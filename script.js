@@ -1043,8 +1043,8 @@ if (addButton) {
             quantity = 1;
         }
 
-        if (quantity > 99) {
-            quantity = 99;
+        if (quantity > 3) {
+            quantity = 3;
         }
 
         const raritySelect =
