@@ -3,206 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>YGO Portfolio</title>
-<style>
-  :root {
-    --bg: #0b0e13;
-    --panel: #121720;
-    --panel2: #171d27;
-    --border: #27303d;
-    --text: #f4f6f8;
-    --muted: #8f9aaa;
-    --accent: #7c5cff;
-    --green: #42d392;
-    --red: #ff6577;
-    --gold: #e7b95c;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  }
-  button, input, select { font: inherit; }
-  button { cursor: pointer; }
-  .app { min-height: 100vh; display: flex; }
-  aside {
-    width: 235px;
-    background: #0e131b;
-    border-right: 1px solid var(--border);
-    padding: 22px 14px;
-    position: fixed;
-    inset: 0 auto 0 0;
-  }
-  .logo { font-size: 20px; font-weight: 800; margin: 0 10px 28px; }
-  .logo span { color: var(--accent); }
-  nav button {
-    width: 100%;
-    border: 0;
-    background: transparent;
-    color: var(--muted);
-    text-align: left;
-    padding: 12px 14px;
-    border-radius: 9px;
-    margin: 3px 0;
-  }
-  nav button.active, nav button:hover {
-    color: white;
-    background: #1b2130;
-  }
-  main { margin-left: 235px; width: calc(100% - 235px); padding: 28px; }
-  .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
-  h1 { margin:0; font-size:28px; }
-  .subtitle { color:var(--muted); margin-top:6px; }
-  .btn {
-    border: 1px solid var(--border);
-    background: var(--panel2);
-    color: white;
-    padding: 10px 14px;
-    border-radius: 9px;
-  }
-  .btn.primary { background:var(--accent); border-color:var(--accent); }
-  .grid { display:grid; gap:14px; }
-  .stats { grid-template-columns: repeat(4, minmax(0,1fr)); }
-  .card {
-    background:var(--panel);
-    border:1px solid var(--border);
-    border-radius:13px;
-    padding:18px;
-  }
-  .label { color:var(--muted); font-size:13px; }
-  .value { font-size:25px; font-weight:750; margin-top:8px; }
-  .green { color:var(--green); }
-  .red { color:var(--red); }
-  .gold { color:var(--gold); }
-  .section { margin-top:20px; }
-  .section-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
-  .section-head h2 { margin:0; font-size:17px; }
-  table { width:100%; border-collapse:collapse; }
-  th, td { padding:13px 10px; border-bottom:1px solid var(--border); text-align:left; font-size:14px; }
-  th { color:var(--muted); font-weight:600; }
-  .pill { display:inline-block; padding:5px 8px; border-radius:999px; background:#202838; color:#cbd3df; font-size:12px; }
-  .page { display:none; }
-  .page.active { display:block; }
-  .searchbar { display:flex; gap:10px; margin-bottom:15px; }
-  .searchbar input {
-    flex:1; background:var(--panel); border:1px solid var(--border);
-    color:white; padding:12px; border-radius:9px;
-  }
-  .cards { grid-template-columns: repeat(4, minmax(0,1fr)); }
-  .card-item { overflow:visible; padding:0; transition:transform .18s ease, box-shadow .18s ease; }
-  .card-item:hover { position:relative; z-index:5; transform:scale(1.08); box-shadow:0 14px 30px rgba(0,0,0,.45); }
-  .card-image {
-    height:240px; display:flex; align-items:center; justify-content:center;
-    background:linear-gradient(145deg,#242a38,#0e1219); color:#7e8796;
-    font-size:14px;
-  }
-  .card-info { padding:14px; }
-  .card-info strong { display:block; margin-bottom:5px; }
-  .card-info small { color:var(--muted); }
-  .deck-card-picker { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; margin-bottom:18px; }
-  .deck-builder-layout { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr); gap:18px; align-items:start; }
-  .deck-picker-panel { min-width:0; }
-  .deck-list-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; overflow:visible; }
-  .deck-name-button { border:0; background:transparent; color:var(--text); padding:0; font-weight:700; cursor:pointer; }
-  .deck-name-button:hover { color:var(--accent); }
-  .deck-edit-button { border:0; background:transparent; color:var(--muted); padding:4px 6px; cursor:pointer; }
-  .deck-edit-button:hover { color:var(--text); }
-  .deck-list-card { position:relative; min-width:0; aspect-ratio:2 / 3; border:1px solid var(--border); border-radius:8px; background:var(--panel2); transition:transform .18s ease, box-shadow .18s ease; }
-  .deck-list-card:hover { z-index:5; transform:scale(1.14); box-shadow:0 14px 30px rgba(0,0,0,.45); }
-  .deck-list-card > img { display:block; width:100%; height:100%; object-fit:contain; border-radius:7px; background:#0e1219; }
-  .deck-list-card > .card-image { height:100%; border-radius:7px; }
-  .deck-list-quantity { position:absolute; right:-5px; bottom:-5px; padding:3px 6px; border-radius:999px; background:var(--accent); color:white; font-size:12px; font-weight:700; }
-  .deck-list-remove { position:absolute; top:5px; right:5px; width:26px; height:26px; padding:0; border:0; border-radius:50%; background:rgba(0,0,0,.75); color:white; }
-  .deck-list-tooltip { display:none; position:absolute; left:calc(100% + 8px); top:0; width:320px; max-height:280px; overflow:auto; padding:14px; z-index:4; background:var(--panel); border:1px solid var(--accent); border-radius:8px; box-shadow:0 10px 25px rgba(0,0,0,.4); }
-  .deck-list-card:hover .deck-list-tooltip { display:block; }
-  .deck-list-tooltip strong, .deck-list-tooltip small, .deck-list-tooltip p { display:block; }
-  .deck-list-tooltip small { color:var(--muted); margin-top:4px; }
-  .deck-list-tooltip p { margin:6px 0 0; color:#d9dee7; font-size:12px; line-height:1.5; white-space:pre-line; }
-  .deck-list-tooltip-label { margin-top:12px; color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
-  .spending-card-matches { display:grid; gap:8px; margin-bottom:18px; }
-  .spending-card-match { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; background:var(--panel); border:1px solid var(--border); border-radius:8px; }
-  .spending-card-match small { display:block; color:var(--muted); margin-top:3px; }
-  .collection-card-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:12px; }
-  .collection-card-tile { position:relative; min-width:0; aspect-ratio:2 / 3; border:1px solid var(--border); border-radius:8px; overflow:visible; background:var(--panel2); transition:transform .18s ease, box-shadow .18s ease; }
-  .collection-card-tile:hover { z-index:5; transform:scale(1.14); box-shadow:0 14px 30px rgba(0,0,0,.45); }
-  .collection-card-tile img { width:100%; height:100%; object-fit:contain; display:block; background:#0e1219; }
-  .collection-card-tile .card-image { height:100%; }
-  .collection-card-quantity { position:absolute; right:6px; bottom:6px; padding:3px 7px; border-radius:999px; background:var(--accent); color:white; font-weight:700; font-size:12px; }
-  .collection-card-details { position:absolute; inset:auto 0 0; padding:10px; background:rgba(10,13,19,.9); font-size:12px; }
-  .collection-card-details strong, .collection-card-details small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .collection-card-details small { color:var(--muted); margin-top:3px; }
-  .collection-card-delete { position:absolute; top:6px; right:6px; border:0; border-radius:50%; background:rgba(0,0,0,.75); color:white; width:25px; height:25px; }
-  .deck-card-option { min-width:0; border:1px solid var(--border); background:var(--panel2); color:var(--text); padding:6px; border-radius:8px; text-align:left; }
-  .deck-card-option { transition:transform .18s ease, box-shadow .18s ease; }
-  .deck-card-option:hover { position:relative; z-index:5; transform:scale(1.08); box-shadow:0 14px 30px rgba(0,0,0,.45); }
-  .deck-card-option.selected { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
-  .deck-card-option img { width:100%; aspect-ratio:2 / 3; object-fit:contain; background:#0e1219; display:block; }
-  .deck-card-option strong, .deck-card-option small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .deck-card-option strong { margin-top:5px; font-size:12px; }
-  .deck-card-option small { color:var(--muted); font-size:11px; margin-top:3px; }
-  .deck-entry-image { position:relative; width:48px; }
-  .deck-entry-image img { display:block; width:48px; height:70px; object-fit:contain; background:#0e1219; }
-  .deck-entry-image span { position:absolute; right:-5px; bottom:-5px; padding:2px 5px; border-radius:999px; background:var(--accent); color:white; font-size:11px; font-weight:700; }
-  .row-actions { display:flex; gap:8px; margin-top:12px; }
-  .empty { text-align:center; color:var(--muted); padding:45px 10px; }
-  .modal {
-    display:none; position:fixed; inset:0; background:rgba(0,0,0,.7);
-    align-items:center; justify-content:center; padding:20px; z-index:10;
-  }
-  .modal.open { display:flex; }
-  .modal-box {
-    width:min(520px,100%); background:var(--panel); border:1px solid var(--border);
-    border-radius:15px; padding:22px;
-  }
-  .modal-box h2 { margin-top:0; }
-  .form-grid { display:grid; gap:12px; }
-  label { color:var(--muted); font-size:13px; display:grid; gap:6px; }
-  input, select {
-    background:#0e131b; color:white; border:1px solid var(--border);
-    padding:11px; border-radius:8px; width:100%;
-  }
-  .modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
-  .notice {
-    background:#171c2a; border:1px solid #303650; padding:12px 14px;
-    border-radius:9px; color:#cdd3e0; font-size:13px; margin-bottom:14px;
-  }
-  @media(max-width:1000px) {
-    aside { width:72px; }
-    .logo { font-size:0; text-align:center; margin-left:0; }
-    .logo span { font-size:18px; }
-    nav button { font-size:0; text-align:center; }
-    nav button::first-letter { font-size:18px; }
-    main { margin-left:72px; width:calc(100% - 72px); }
-    .stats { grid-template-columns:repeat(2,1fr); }
-    .cards { grid-template-columns:repeat(2,1fr); }
-    .deck-card-picker { grid-template-columns:repeat(4,minmax(0,1fr)); }
-    .deck-builder-layout { grid-template-columns:1fr; }
-    .deck-list-grid { grid-template-columns:repeat(6,minmax(0,1fr)); }
-  }
-  @media(max-width:650px) {
-    main { padding:18px; }
-    .stats, .cards { grid-template-columns:1fr; }
-    .deck-card-picker { grid-template-columns:repeat(2,minmax(0,1fr)); }
-    .deck-list-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
-    .collection-card-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
-    .topbar { align-items:flex-start; gap:12px; flex-direction:column; }
-    table { min-width:650px; }
-    .table-wrap { overflow:auto; }
-  }
-</style>
+<title>YGO Collect</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="app">
   <aside>
-    <div class="logo">YGO <span>Portfolio</span></div>
+    <div class="logo">YGO <span>Collect</span></div>
     <nav>
-      <button class="active" data-page="dashboard">▦ Dashboard</button>
-      <button data-page="collection">▣ Collection</button>
-      <button data-page="spending">₱ Spending</button>
-      <button data-page="cards">◈ Cards</button>
-      <button data-page="decks">◇ Decks</button>
+      <button class="active" data-page="dashboard"><img src="./data/icons/data-analysis.png" alt="Dashboard">Dashboard</button>
+      <button data-page="collection"><img src="./data/icons/book.png" alt="Collection"> Collection</button>
+      <button data-page="spending"><span id="currencySymbol">₱</span> Spending</button>
+      <button data-page="cards"><img src="./data/icons/card-games.png" alt="Cards"> Cards</button>
+      <button data-page="decks"><img src="./data/icons/stack-cards.png" alt="Decks"> Decks</button>
+      <button data-page="market"><img src="./data/icons/basket.png" alt="Market"> Market Place</button>
     </nav>
   </aside>
 
@@ -210,13 +24,13 @@
     <section id="dashboard" class="page active">
       <div class="topbar">
         <div><h1>Portfolio</h1><div class="subtitle">Your Yu-Gi-Oh collection and spending in one place.</div></div>
-        <button class="btn primary" onclick="openPurchase()">+ Add Purchase</button>
+        
       </div>
 
       <div class="grid stats">
-        <div class="card"><div class="label">Collection Value</div><div class="value" id="dashValue">₱0</div></div>
-        <div class="card"><div class="label">Total Spent</div><div class="value" id="dashSpent">₱0</div></div>
-        <div class="card"><div class="label">Unrealized Gain</div><div class="value green" id="dashGain">₱0</div></div>
+        <div class="card"><div class="label">Collection Value</div><div class="value" id="dashValue"><span id="currencySymbol">₱</span>0</div></div>
+        <div class="card"><div class="label">Total Spent</div><div class="value" id="dashSpent"><span id="currencySymbol">₱</span>0</div></div>
+        <div class="card"><div class="label">Unrealized Gain</div><div class="value green" id="dashGain"><span id="currencySymbol">₱</span>0</div></div>
         <div class="card"><div class="label">Cards Owned</div><div class="value" id="dashCards">0</div></div>
       </div>
 
@@ -229,10 +43,10 @@
         </div>
         <div class="card">
           <div class="section-head"><h2>Spending</h2><span class="pill">This month</span></div>
-          <div class="value" id="monthSpent">₱0</div>
+          <div class="value" id="monthSpent"><span id="currencySymbol">₱</span>0</div>
           <div class="subtitle">Purchases recorded this month</div>
           <div style="margin-top:25px;" class="label">Average purchase</div>
-          <div class="value" id="avgPurchase">₱0</div>
+          <div class="value" id="avgPurchase"><span id="currencySymbol">₱</span>0</div>
         </div>
       </div>
 
@@ -245,13 +59,12 @@
     <section id="collection" class="page">
       <div class="topbar">
         <div><h1>Collection</h1><div class="subtitle">Cards you own. Purchases automatically add cards here.</div></div>
-        <button class="btn primary" onclick="openPurchase()">+ Add Purchase</button>
+        
       </div>
       <div class="notice">Purchase price is tracked separately from current market value. Adding a purchase also updates your collection quantity.</div>
       <div class="searchbar"><input id="collectionSearch" oninput="renderCollection()" placeholder="Search your collection..."></div>
-      <div class="section card">
-        <div class="section-head"><h2>Add Card Purchase</h2></div>
-        <div class="searchbar"><input id="collectionCardSearch" oninput="renderCollectionCardMatches()" placeholder="Search by card name or card code..."></div>
+      <div class="section card purchase-search-section">
+      
         <div class="spending-card-matches" id="collectionCardMatches"></div>
       </div>
       <div class="card"><div class="collection-card-grid" id="collectionTable"></div></div>
@@ -263,14 +76,13 @@
         <button class="btn primary" onclick="openPurchase()">+ Add Purchase</button>
       </div>
       <div class="grid stats">
-        <div class="card"><div class="label">Total Spent</div><div class="value" id="spentTotal">₱0</div></div>
-        <div class="card"><div class="label">This Month</div><div class="value" id="spentMonth">₱0</div></div>
+        <div class="card"><div class="label">Total Spent</div><div class="value" id="spentTotal"><span id="currencySymbol">₱</span>0</div></div>
+        <div class="card"><div class="label">This Month</div><div class="value" id="spentMonth"><span id="currencySymbol">₱</span>0</div></div>
         <div class="card"><div class="label">Purchases</div><div class="value" id="purchaseCount">0</div></div>
-        <div class="card"><div class="label">Average Purchase</div><div class="value" id="purchaseAverage">₱0</div></div>
+        <div class="card"><div class="label">Average Purchase</div><div class="value" id="purchaseAverage"><span id="currencySymbol">₱</span>0</div></div>
       </div>
-      <div class="section card">
-        <div class="section-head"><h2>Add Card Purchase</h2></div>
-        <div class="searchbar"><input id="spendingCardSearch" oninput="renderSpendingCardMatches()" placeholder="Search by card name or card code..."></div>
+      <div class="section card purchase-search-section">
+        <div class="section-head"><h2>Add Card Purchase</h2><div class="purchase-search"><input id="spendingCardSearch" oninput="queuePurchaseMatchRender('spending')" placeholder="Search card..."></div></div>
         <div class="spending-card-matches" id="spendingCardMatches"></div>
       </div>
       <div class="section card">
@@ -283,7 +95,7 @@
       <div class="topbar">
         <div><h1>Cards</h1><div class="subtitle">Search Asian-English and Japanese Yu-Gi-Oh cards from TCG Corner.</div></div>
       </div>
-      <div class="searchbar"><input id="cardSearch" oninput="renderCards()" placeholder="Search cards..."></div>
+      <div class="searchbar"><input id="cardSearch" oninput="queueCardRender()" placeholder="Search cards..."></div>
       <div class="grid cards" id="cardGrid"></div>
     </section>
 
@@ -291,8 +103,57 @@
       <div class="topbar"><div><h1>Decks</h1><div class="subtitle">Deck builder will connect to your collection.</div></div><button class="btn primary" onclick="addDeck()">+ New Deck</button></div>
       <div class="grid stats">
         <div class="card"><div class="label">My Decks</div><div class="value" id="deckCount">0</div></div>
-        <div class="card"><div class="label">Cards Missing</div><div class="value" id="deckMissing">0</div></div>
-        <div class="card"><div class="label">Deck Value</div><div class="value" id="deckValue">₱0</div></div>
+        <div class="card"><div class="label">Cards in Deck</div><div class="value" id="deckMissing">0</div></div>
+        <div class="card"><div class="label">Deck Value</div><div class="value" id="deckValue"><span id="currencySymbol">₱</span>0</div></div>
+        <div class="card"><div class="label">Estimated Cost</div><div class="value" id="deckEstimatedCost">₱0</div></div>
+      </div>
+      <div class="section card empty" id="deckList">No decks yet. The deck builder will use the same card and collection database.</div>
+      
+
+      <div class="banlist-selector">
+        <label for="banlistSelect"><h1>Banlist:</h1></label>
+
+        <select id="banlistSelect">
+          <option value="AE">Asian English</option>
+          <option value="TCG">TCG</option>
+        </select>
+
+      </div>
+      <div class="section card" id="deckProfile" style="display:none;"></div>
+    </section>
+  </main>
+</div>
+
+<div id="banlistPopup" class="banlist-popup-overlay">
+  <div class="banlist-popup">
+    <div class="banlist-popup-title" id="banlistPopupTitle">
+      Card Limit
+    </div>
+
+    <div class="banlist-popup-message" id="banlistPopupMessage">
+    </div>
+
+    <button id="banlistPopupClose" class="banlist-popup-close">
+      OK
+    </button>
+  </div>
+</div>
+
+
+    <section id="market" class="page">
+      <div class="topbar">
+        <div><h1>Market Place</h1><div class="subtitle">Input your selling items.</div></div>
+      </div>
+      <div class="searchbar"><input id="cardSearch" oninput="queueCardRender()" placeholder="Search cards..."></div>
+      <div class="grid cards" id="cardGrid"></div>
+    </section>
+
+    <section id="decks" class="page">
+      <div class="topbar"><div><h1>Market Place</h1><div class="subtitle">Make this your selling binder. </div></div><button class="btn primary" onclick="addDeck()">+ New Deck</button></div>
+      <div class="grid stats">
+        <div class="card"><div class="label">My Decks</div><div class="value" id="deckCount">0</div></div>
+        <div class="card"><div class="label">Cards in Deck</div><div class="value" id="deckMissing">0</div></div>
+        <div class="card"><div class="label">Deck Value</div><div class="value" id="deckValue"><span id="currencySymbol">₱</span>0</div></div>
         <div class="card"><div class="label">Estimated Cost</div><div class="value" id="deckEstimatedCost">₱0</div></div>
       </div>
       <div class="section card empty" id="deckList">No decks yet. The deck builder will use the same card and collection database.</div>
@@ -301,11 +162,14 @@
   </main>
 </div>
 
+
 <div class="modal" id="purchaseModal">
-  <div class="modal-box">
+  <div class="modal-box purchase-modal-box">
     <h2>Add Purchase</h2>
     <div class="subtitle" style="margin-bottom:18px;">One purchase automatically adds the card to your collection.</div>
-    <div class="form-grid">
+    <div class="purchase-form-layout">
+      <div class="purchase-card-preview" id="purchaseCardPreview"><div class="card-image">No image</div></div>
+      <div class="form-grid">
       <label>Card Name
         <input id="purchaseCardName" list="purchaseCardOptions" oninput="findPurchaseCard()" placeholder="Type card name or card code...">
         <datalist id="purchaseCardOptions"></datalist>
@@ -331,6 +195,7 @@
       <label>Seller
         <input id="purchaseSeller" placeholder="Optional">
       </label>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn" onclick="closePurchase()">Cancel</button>
@@ -339,793 +204,111 @@
   </div>
 </div>
 
-<script>
-const TCG_FEEDS = [
-  {
-    url: "https://tcg-corner.com/collections/yu-gi-oh-single-card-asia-english/products.json?limit=250",
-    language: "Asian English"
-  },
-  {
-    url: "https://tcg-corner.com/collections/yu-gi-oh-single-card-japanese/products.json?limit=250",
-    language: "Japanese"
-  }
-];
-const TCG_GLOBAL_FEED = "https://tcg-corner.com/products.json";
-const TCGC_RAR = {
-  C: "C", N: "C", NR: "C", R: "R", SR: "SR", UR: "UR", UL: "UtR", ULT: "UtR",
-  SER: "ScR", SE: "ScR", PSER: "PScR", PSE: "PScR",
-  EXSER: "ExSR", ESER: "ExSR", ESE: "ExSR",
-  QCSR: "QCSR", QSCR: "QCSR", QCSER: "QCSR", QCSE: "QCSR", QC: "QCSR",
-  CR: "CR", COR: "CR", HR: "HGR", HGR: "HGR"
-};
-let cards = [];
-let tcgLoading = true;
-let tcgError = "";
+<div class="modal" id="deckModal">
+  <div class="modal-box">
+    <h2>New Deck</h2>
+    <div class="form-grid">
+      <label>Deck name
+        <input id="deckNameInput" placeholder="e.g. Blue-Eyes White Dragon" maxlength="80">
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeDeckModal()">Cancel</button>
+      <button class="btn primary" onclick="saveDeck()">Create Deck</button>
+    </div>
+  </div>
+</div>
 
-let purchases = JSON.parse(localStorage.getItem("ygoPurchases") || "[]");
-let decks = JSON.parse(localStorage.getItem("ygoDecks") || "[]");
-let deckCards = JSON.parse(localStorage.getItem("ygoDeckCards") || "{}");
-let activeDeck = "";
-let selectedDeckCardId = "";
-let deckCardSearchTerm = "";
+<div id="cardDetailsPanel" class="card-details-panel" hidden>
 
-function money(n) {
-  return "₱" + Number(n || 0).toLocaleString("en-PH",{minimumFractionDigits:0,maximumFractionDigits:2});
-}
-function saveData() {
-  localStorage.setItem("ygoPurchases", JSON.stringify(purchases));
-  localStorage.setItem("ygoDecks", JSON.stringify(decks));
-  localStorage.setItem("ygoDeckCards", JSON.stringify(deckCards));
-}
-function showPage(page) {
-  document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
-  document.getElementById(page).classList.add("active");
-  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.page === page));
-  if(page === "dashboard") renderDashboard();
-  if(page === "collection") renderCollection();
-  if(page === "spending") renderSpending();
-  if(page === "cards") renderCards();
-  if(page === "decks") renderDecks();
-}
-document.querySelectorAll("nav button").forEach(b => b.onclick = () => showPage(b.dataset.page));
+    <button type="button" id="closeCardDetails" class="close-card-details">×</button>
 
-function populatePurchaseDestinations() {
-  const select = document.getElementById("purchaseDestination");
-  const current = select.value;
-  select.innerHTML = [
-    "<option>Binder Collection</option>",
-    ...decks.map(deck => `<option>Deck: ${escapeHtml(deck)}</option>`)
-  ].join("");
-  if ([...select.options].some(option => option.value === current)) select.value = current;
-}
+    <div class="card-details">
 
-function addDeck() {
-  const name = prompt("Deck name:");
-  if (!name || !name.trim()) return;
-  const deckName = name.trim();
-  if (decks.some(deck => deck.toLowerCase() === deckName.toLowerCase())) return;
-  decks.push(deckName);
-  saveData();
-  populatePurchaseDestinations();
-  renderDecks();
-  openDeckProfile(deckName);
-}
+        <div class="card-details-image">
+            <img id="detailCardImage" src="" alt="">
+        </div>
 
-function renderDecks() {
-  const list = document.getElementById("deckList");
-  const profile = document.getElementById("deckProfile");
-  const owned = {};
-  purchases.forEach(purchase => {
-    owned[purchase.cardId] = (owned[purchase.cardId] || 0) + purchase.qty;
-  });
-  let deckValue = 0;
-  let missingCards = 0;
-  let estimatedCost = 0;
-  Object.values(deckCards).flat().forEach(entry => {
-    const card = cards.find(item => String(item.id) === String(entry.cardId));
-    const price = card?.price || entry.price || 0;
-    const missing = Math.max(0, entry.qty - (owned[entry.cardId] || 0));
-    deckValue += entry.qty * price;
-    missingCards += missing;
-    estimatedCost += missing * price;
-  });
-  document.getElementById("deckCount").textContent = decks.length;
-  document.getElementById("deckMissing").textContent = missingCards;
-  document.getElementById("deckValue").textContent = money(deckValue);
-  document.getElementById("deckEstimatedCost").textContent = money(estimatedCost);
-  if (!decks.length) {
-    list.className = "section card empty";
-    list.textContent = "No decks yet. The deck builder will use the same card and collection database.";
-    profile.style.display = "none";
-    return;
-  }
-  list.className = "section card";
-  list.innerHTML = decks.map(deck => `<div class="section-head"><div><button class="deck-name-button" data-deck-name="${escapeHtml(deck)}">${escapeHtml(deck)}</button><button class="deck-edit-button" title="Rename deck" data-rename-deck="${escapeHtml(deck)}">✎</button></div><span class="pill">Deck</span></div>`).join("");
-  list.querySelectorAll("[data-deck-name]").forEach(button => {
-    button.onclick = () => toggleDeckProfile(button.dataset.deckName);
-  });
-  list.querySelectorAll("[data-rename-deck]").forEach(button => {
-    button.onclick = () => renameDeck(button.dataset.renameDeck);
-  });
-  if (activeDeck && decks.includes(activeDeck)) renderDeckProfile();
-}
+        <div class="card-details-info">
 
-function toggleDeckProfile(deckName) {
-  if (activeDeck === deckName) {
-    activeDeck = "";
-    renderDecks();
-    return;
-  }
-  openDeckProfile(deckName);
-}
+            <h2 id="detailCardName"></h2>
 
-function renameDeck(oldName) {
-  const newName = prompt("Deck name:", oldName);
-  if (!newName || !newName.trim()) return;
-  const trimmedName = newName.trim();
-  if (trimmedName === oldName || decks.some(deck => deck.toLowerCase() === trimmedName.toLowerCase())) return;
+            <p>
+                <strong>Type:</strong>
+                <span id="detailCardType"></span>
+            </p>
 
-  const deckIndex = decks.indexOf(oldName);
-  if (deckIndex < 0) return;
-  decks[deckIndex] = trimmedName;
-  if (deckCards[oldName]) {
-    deckCards[trimmedName] = deckCards[oldName];
-    delete deckCards[oldName];
-  }
-  purchases.forEach(purchase => {
-    if (purchase.destination === `Deck: ${oldName}`) purchase.destination = `Deck: ${trimmedName}`;
-  });
-  if (activeDeck === oldName) activeDeck = trimmedName;
-  saveData();
-  populatePurchaseDestinations();
-  renderDecks();
-}
+            <p>
+                <strong>ATK:</strong>
+                <span id="detailCardAtk"></span>
+            </p>
 
-function openDeckProfile(deckName) {
-  activeDeck = deckName;
-  renderDeckProfile();
-}
+            <p>
+                <strong>DEF:</strong>
+                <span id="detailCardDef"></span>
+            </p>
 
-function renderDeckProfile() {
-  const profile = document.getElementById("deckProfile");
-  if (!activeDeck || !decks.includes(activeDeck)) {
-    profile.style.display = "none";
-    return;
-  }
+            <p>
+                <strong>Level:</strong>
+                <span id="detailCardLevel"></span>
+            </p>
 
-  const entries = deckCards[activeDeck] || [];
-  profile.style.display = "block";
-  profile.innerHTML = `
-    <div class="section-head"><h2>${escapeHtml(activeDeck)}</h2><span class="pill">${entries.reduce((sum, entry) => sum + entry.qty, 0)} cards</span></div>
-    <div class="deck-builder-layout">
-      <div class="deck-list-grid">${entries.flatMap(entry => Array.from({ length: entry.qty }, (_, copyIndex) => {
-          const card = cards.find(item => String(item.id) === String(entry.cardId));
-          const name = card?.name || entry.card || "Unknown card";
-          const rarity = card?.rarity || entry.rarity || "";
-          const image = card?.image ? `<img src="${escapeHtml(card.image)}" alt="${escapeHtml(name)}">` : `<div class="card-image">No image</div>`;
-          return `<div class="deck-list-card">
-            ${image}
-            <span class="deck-list-quantity">${copyIndex + 1}/${entry.qty}</span>
-            <button class="deck-list-remove" title="Remove one copy" onclick="removeCardFromDeck('${escapeHtml(entry.cardId)}')">×</button>
-            <div class="deck-list-tooltip">
-              <strong>${escapeHtml(name)}</strong>
-              <small>${escapeHtml(card?.cardCode || "")} · ${escapeHtml(rarity)} · ${money(card?.price || entry.price)}</small>
-              <div class="deck-list-tooltip-label">Card text</div>
-              <p>${escapeHtml(card?.cardText || entry.cardText || "Card text unavailable.")}</p>
+            <p>
+                <strong>Attribute:</strong>
+                <span id="detailCardAttribute"></span>
+            </p>
+
+            <p>
+                <strong>Card Set:</strong>
+                <span id="detailCardSet"></span>
+            </p>
+
+            <p>
+                <strong>Rarity:</strong>
+                <span id="detailCardRarity"></span>
+            </p>
+
+            <div class="card-details-description">
+                <strong>Description</strong>
+                <p id="detailCardDescription"></p>
             </div>
-          </div>`;
-        })).join("") || `<div class="empty" style="grid-column:1/-1;">No cards in this deck yet.</div>`}</div>
-      <div class="deck-picker-panel">
-        <div class="searchbar">
-          <input id="deckCardSearch" oninput="renderDeckCardPicker()" value="${escapeHtml(deckCardSearchTerm)}" placeholder="Search cards by name, number, or rarity..." ${cards.length ? "" : "disabled"}>
-          <input id="deckCardQty" type="number" min="1" value="1" style="max-width:100px;">
-          <button class="btn primary" onclick="addCardToDeck()" ${cards.length ? "" : "disabled"}>Add Card</button>
+
+            <!-- ADD THE BUTTON HERE -->
+            <div class="add-to-deck-controls">
+
+              <label for="detailCardRaritySelect">
+                Rarity
+              </label>
+
+              <select id="detailCardRaritySelect">
+                  <option value="">Select rarity</option>
+              </select>
+
+              <label for="detailCardQuantity">
+                  Quantity
+              </label>
+
+            <input
+              type="number"
+              id="detailCardQuantity"
+              min="1"
+              max="3"
+              value="1">
+
+            <button
+              type="button"
+              id="addDetailCardToDeck"
+              class="add-detail-card-btn">
+              Add to Deck
+            </button>
+
+          </div>
+
         </div>
-        <div class="deck-card-picker" id="deckCardPicker">${cards.length ? "" : "Loading cards..."}</div>
-      </div>
-    </div>`;
-  renderDeckCardPicker();
-}
+    </div>
+</div>
 
-function renderDeckCardPicker() {
-  const picker = document.getElementById("deckCardPicker");
-  if (!picker || !cards.length) return;
 
-  deckCardSearchTerm = document.getElementById("deckCardSearch").value;
-  const query = deckCardSearchTerm.toLowerCase().trim();
-  const groups = new Map();
-  cards.forEach(card => {
-    const key = `${card.sourceLanguage}|${card.cardCode || card.productId}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(card);
-  });
-  const visibleGroups = [...groups.values()].filter(variants => !query || variants.some(card =>
-    card.name.toLowerCase().includes(query) ||
-    card.cardCode.toLowerCase().includes(query) ||
-    card.rarity.toLowerCase().includes(query) ||
-    card.tags.toLowerCase().includes(query)
-  )).slice(0, 60);
-  const allVisibleVariants = visibleGroups.flat();
-  if (!allVisibleVariants.some(card => String(card.id) === String(selectedDeckCardId))) {
-    selectedDeckCardId = allVisibleVariants[0]?.id || "";
-  }
-
-  picker.innerHTML = visibleGroups.map(variants => {
-    const selectedCard = variants.find(card => String(card.id) === String(selectedDeckCardId)) || variants[0];
-    const rarityOptions = [...new Map(variants.map(card => [card.rarity, card])).values()];
-    return `
-    <div class="deck-card-option ${variants.some(card => String(card.id) === String(selectedDeckCardId)) ? "selected" : ""}" data-card-id="${escapeHtml(selectedCard.id)}">
-      ${selectedCard.image ? `<img src="${escapeHtml(selectedCard.image)}" alt="${escapeHtml(selectedCard.name)}">` : "<div class=\"card-image\">No image</div>"}
-      <strong>${escapeHtml(selectedCard.name)}</strong>
-      <select onchange="selectDeckCard(this.value)" onclick="event.stopPropagation()">
-        ${rarityOptions.map(card => `<option value="${escapeHtml(card.id)}" ${String(card.id) === String(selectedCard.id) ? "selected" : ""}>${escapeHtml(card.rarity)} · ${money(card.price)}</option>`).join("")}
-      </select>
-    </div>`;
-  }).join("") || `<div class="empty" style="grid-column:1/-1;">No cards match this search.</div>`;
-  picker.querySelectorAll(".deck-card-option").forEach(tile => {
-    tile.onclick = () => selectDeckCard(tile.dataset.cardId);
-  });
-}
-
-function selectDeckCard(cardId) {
-  selectedDeckCardId = cardId;
-  renderDeckCardPicker();
-}
-
-function addCardToDeck() {
-  if (!activeDeck) return;
-  const card = cards.find(item => String(item.id) === String(selectedDeckCardId));
-  const qty = Number(document.getElementById("deckCardQty").value);
-  if (!card || qty < 1) return;
-
-  addCardEntryToDeck(activeDeck, card, qty);
-  saveData();
-  renderDecks();
-}
-
-function addCardEntryToDeck(deckName, card, qty) {
-  const entries = deckCards[deckName] || (deckCards[deckName] = []);
-  const existing = entries.find(entry => String(entry.cardId) === String(card.id));
-  if (existing) existing.qty += qty;
-  else entries.push({ cardId: card.id, card: card.name, rarity: card.rarity, price: card.price, qty });
-}
-
-function syncPurchasesToDecks() {
-  let changed = false;
-  purchases.forEach(purchase => {
-    if (!purchase.destination?.startsWith("Deck: ")) return;
-    const deckName = purchase.destination.slice("Deck: ".length);
-    const card = cards.find(item => String(item.id) === String(purchase.cardId));
-    const alreadyListed = deckCards[deckName]?.some(entry => String(entry.cardId) === String(purchase.cardId));
-    if (card && decks.includes(deckName) && !alreadyListed) {
-      addCardEntryToDeck(deckName, card, purchase.qty);
-      changed = true;
-    }
-  });
-  if (changed) saveData();
-}
-
-function removeCardFromDeck(cardId) {
-  if (!activeDeck || !deckCards[activeDeck]) return;
-  const entry = deckCards[activeDeck].find(item => String(item.cardId) === String(cardId));
-  if (!entry) return;
-  entry.qty -= 1;
-  deckCards[activeDeck] = deckCards[activeDeck].filter(item => item.qty > 0);
-  saveData();
-  renderDecks();
-}
-
-function removeQuantityFromDeck(deckName, cardId, qty) {
-  const entry = deckCards[deckName]?.find(item => String(item.cardId) === String(cardId));
-  if (!entry) return;
-  entry.qty -= qty;
-  deckCards[deckName] = deckCards[deckName].filter(item => item.qty > 0);
-}
-
-function deletePurchase(purchaseId) {
-  const index = purchases.findIndex(purchase => String(purchase.id) === String(purchaseId));
-  if (index < 0) return;
-  const purchase = purchases[index];
-  if (!confirm(`Delete the purchase of ${purchase.card}?`)) return;
-  purchases.splice(index, 1);
-  if (purchase.destination?.startsWith("Deck: ")) {
-    removeQuantityFromDeck(purchase.destination.slice("Deck: ".length), purchase.cardId, purchase.qty);
-  }
-  saveData();
-  renderDashboard();
-  renderCollection();
-  renderSpending();
-  renderDecks();
-}
-
-function deleteCollectionGroup(cardId, printing, destination) {
-  const matching = purchases.filter(purchase =>
-    String(purchase.cardId) === String(cardId) &&
-    purchase.printing === printing &&
-    (purchase.destination || "Binder Collection") === destination
-  );
-  if (!matching.length || !confirm(`Delete all ${matching.reduce((sum, purchase) => sum + purchase.qty, 0)} copies of this card?`)) return;
-  purchases = purchases.filter(purchase => !matching.includes(purchase));
-  if (destination.startsWith("Deck: ")) {
-    removeQuantityFromDeck(destination.slice("Deck: ".length), cardId, matching.reduce((sum, purchase) => sum + purchase.qty, 0));
-  }
-  saveData();
-  renderDashboard();
-  renderCollection();
-  renderSpending();
-  renderDecks();
-}
-
-function openPurchase() {
-  const select = document.getElementById("purchaseCard");
-  if (!cards.length) {
-    alert(tcgLoading ? "The TCG Corner catalog is still loading." : "No TCG Corner Yu-Gi-Oh products were loaded.");
-    return;
-  }
-  populatePurchaseDestinations();
-  const groups = new Map();
-  cards.forEach(card => {
-    const key = `${card.sourceLanguage}|${card.cardCode || card.productId}`;
-    if (!groups.has(key)) groups.set(key, card);
-  });
-  select.innerHTML = [...groups.values()].map(card => `<option value="${escapeHtml(card.id)}">${escapeHtml(card.name)} · ${escapeHtml(card.cardCode)}</option>`).join("");
-  document.getElementById("purchaseCardOptions").innerHTML = [...groups.values()].map(card => `<option value="${escapeHtml(card.name)}" label="${escapeHtml(card.cardCode)}"></option>`).join("");
-  document.getElementById("purchaseCardName").value = "";
-  document.getElementById("purchaseDate").value = new Date().toISOString().slice(0,10);
-  updatePurchaseFields();
-  document.getElementById("purchaseModal").classList.add("open");
-}
-function findPurchaseCard() {
-  const query = document.getElementById("purchaseCardName").value.toLowerCase().trim();
-  if (!query) return;
-  const card = cards.find(item => item.name.toLowerCase() === query || item.cardCode.toLowerCase() === query);
-  if (!card) return;
-  const option = [...document.getElementById("purchaseCard").options].find(item => {
-    const optionCard = cards.find(cardItem => String(cardItem.id) === String(item.value));
-    return optionCard && optionCard.sourceLanguage === card.sourceLanguage &&
-      (optionCard.cardCode ? optionCard.cardCode === card.cardCode : optionCard.productId === card.productId);
-  });
-  if (option) document.getElementById("purchaseCard").value = option.value;
-  document.getElementById("purchaseCardName").value = card.name;
-  updatePurchaseFields();
-}
-function getRarityVariants(card) {
-  return cards.filter(item =>
-    item.sourceLanguage === card.sourceLanguage &&
-    (item.cardCode ? item.cardCode === card.cardCode : item.productId === card.productId)
-  );
-}
-function updatePurchaseFields() {
-  const card = cards.find(c => c.id == document.getElementById("purchaseCard").value);
-  if (!card) return;
-  const raritySelect = document.getElementById("purchaseRarity");
-  const variants = [...new Map(getRarityVariants(card).map(item => [item.rarity, item])).values()];
-  raritySelect.innerHTML = variants.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.rarity)} · ${money(item.price)}</option>`).join("");
-  updatePurchaseRarity();
-}
-function updatePurchaseRarity() {
-  const card = cards.find(c => c.id == document.getElementById("purchaseRarity").value);
-  if (!card) return;
-  document.getElementById("purchasePrice").value = card.price || 0;
-}
-document.getElementById("purchaseCard").addEventListener("change", updatePurchaseFields);
-document.getElementById("purchaseRarity").addEventListener("change", updatePurchaseRarity);
-function closePurchase() { document.getElementById("purchaseModal").classList.remove("open"); }
-
-function savePurchase() {
-  const card = cards.find(c => c.id == document.getElementById("purchaseRarity").value);
-  const qty = Number(document.getElementById("purchaseQty").value);
-  const price = Number(document.getElementById("purchasePrice").value);
-  const destination = document.getElementById("purchaseDestination").value;
-  if(!card || qty < 1 || price < 0) return;
-  purchases.unshift({
-    id: Date.now(),
-    cardId: card.id,
-    card: card.name,
-    printing: card.rarity,
-    destination,
-    qty,
-    price,
-    total: qty * price,
-    date: document.getElementById("purchaseDate").value,
-    seller: document.getElementById("purchaseSeller").value || "—"
-  });
-  if (destination.startsWith("Deck: ")) {
-    const deckName = destination.slice("Deck: ".length);
-    if (decks.includes(deckName)) addCardEntryToDeck(deckName, card, qty);
-  }
-  saveData();
-  closePurchase();
-  renderDashboard();
-  showPage("collection");
-}
-
-function collectionRows() {
-  const map = {};
-  purchases.forEach(p => {
-    const destination = p.destination || "Binder Collection";
-    const key = p.cardId + "|" + p.printing + "|" + destination;
-    if(!map[key]) map[key] = {cardId:p.cardId,card:p.card,printing:p.printing,destination,qty:0,paid:0};
-    map[key].qty += p.qty;
-    map[key].paid += p.total;
-  });
-  return Object.values(map);
-}
-
-function renderDashboard() {
-  const rows = collectionRows();
-  const value = rows.reduce((s,r) => s + r.qty * (cards.find(c=>String(c.id)===String(r.cardId))?.price || 0),0);
-  const spent = purchases.reduce((s,p)=>s+p.total,0);
-  document.getElementById("dashValue").textContent = money(value);
-  document.getElementById("dashSpent").textContent = money(spent);
-  document.getElementById("dashGain").textContent = money(value-spent);
-  document.getElementById("dashCards").textContent = rows.reduce((s,r)=>s+r.qty,0);
-  const now = new Date();
-  const month = purchases.filter(p => {
-    const d = new Date(p.date);
-    return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
-  }).reduce((s,p)=>s+p.total,0);
-  document.getElementById("monthSpent").textContent = money(month);
-  document.getElementById("avgPurchase").textContent = money(purchases.length ? spent/purchases.length : 0);
-  document.getElementById("recentPurchases").innerHTML = purchases.slice(0,5).map(p =>
-    (() => {
-      const marketPrice = cards.find(card => String(card.id) === String(p.cardId))?.price || 0;
-      const gain = marketPrice * p.qty - p.total;
-      return `<tr><td>${p.date}</td><td>${p.card}</td><td>${p.qty}</td><td>${money(p.price)}</td><td>${money(marketPrice)}</td><td>${money(p.total)}</td><td class="${gain >= 0 ? "green" : "red"}">${gain >= 0 ? "+" : ""}${money(gain)}</td></tr>`;
-    })()
-  ).join("") || `<tr><td colspan="7" class="empty">No purchases yet.</td></tr>`;
-}
-
-function renderCollection() {
-  const q = document.getElementById("collectionSearch").value.toLowerCase();
-  const rows = collectionRows().filter(r => r.card.toLowerCase().includes(q));
-  document.getElementById("collectionTable").innerHTML = rows.map(r => {
-    const card = cards.find(c => String(c.id) === String(r.cardId));
-    const market = (cards.find(c=>String(c.id)===String(r.cardId))?.price || 0) * r.qty;
-    return `<div class="collection-card-tile">
-      ${card?.image ? `<img src="${escapeHtml(card.image)}" alt="${escapeHtml(r.card)}">` : `<div class="card-image">No image</div>`}
-      <span class="collection-card-quantity">×${r.qty}</span>
-      <button class="collection-card-delete" title="Delete card" onclick="deleteCollectionGroup('${escapeHtml(r.cardId)}','${escapeHtml(r.printing)}','${escapeHtml(r.destination)}')">×</button>
-      <div class="collection-card-details"><strong>${escapeHtml(r.card)}</strong><small>${escapeHtml(r.printing)} · ${escapeHtml(r.destination)} · ${money(market)}</small></div>
-    </div>`;
-  }).join("") || `<div class="empty" style="grid-column:1/-1;">No cards in your collection.</div>`;
-}
-
-function renderPurchaseCardMatches(searchId, matchesId) {
-  const input = document.getElementById(searchId);
-  const matchesContainer = document.getElementById(matchesId);
-  if (!input || !matchesContainer) return;
-
-  const query = input.value.toLowerCase().trim();
-  if (!query) {
-    matchesContainer.innerHTML = "";
-    return;
-  }
-  if (tcgLoading) {
-    matchesContainer.innerHTML = `<div class="empty">Loading cards...</div>`;
-    return;
-  }
-
-  const groups = new Map();
-  cards.forEach(card => {
-    if (!card.name.toLowerCase().includes(query) && !card.cardCode.toLowerCase().includes(query)) return;
-    const key = `${card.sourceLanguage}|${card.cardCode || card.productId}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(card);
-  });
-  const visibleGroups = [...groups.values()].slice(0, 30);
-  matchesContainer.innerHTML = visibleGroups.map(variants => {
-    const card = variants[0];
-    const rarityOptions = [...new Map(variants.map(variant => [variant.rarity, variant])).values()];
-    return `<div class="spending-card-match">
-      <div><strong>${escapeHtml(card.name)}</strong><small>${escapeHtml(card.cardCode)}</small></div>
-      <select onchange="updateSpendingPurchase(this)">
-        ${rarityOptions.map(variant => `<option value="${escapeHtml(variant.id)}">${escapeHtml(variant.rarity)} · ${money(variant.price)}</option>`).join("")}
-      </select>
-      <button class="btn primary spending-add-purchase" data-card-id="${escapeHtml(card.id)}" onclick="openPurchaseFor(this.dataset.cardId)">Add Purchase</button>
-    </div>`;
-  }).join("") || `<div class="empty">No cards match this name or card code.</div>`;
-}
-
-function renderSpendingCardMatches() {
-  renderPurchaseCardMatches("spendingCardSearch", "spendingCardMatches");
-}
-
-function renderCollectionCardMatches() {
-  renderPurchaseCardMatches("collectionCardSearch", "collectionCardMatches");
-}
-
-function updateSpendingPurchase(select) {
-  const card = cards.find(item => String(item.id) === String(select.value));
-  if (!card) return;
-  select.closest(".spending-card-match").querySelector(".spending-add-purchase").dataset.cardId = card.id;
-}
-
-function renderSpending() {
-  const total = purchases.reduce((s,p)=>s+p.total,0);
-  const now = new Date();
-  const month = purchases.filter(p => {const d=new Date(p.date);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();}).reduce((s,p)=>s+p.total,0);
-  document.getElementById("spentTotal").textContent = money(total);
-  document.getElementById("spentMonth").textContent = money(month);
-  document.getElementById("purchaseCount").textContent = purchases.length;
-  document.getElementById("purchaseAverage").textContent = money(purchases.length ? total/purchases.length : 0);
-  document.getElementById("purchaseTable").innerHTML = purchases.map(p =>
-    (() => {
-      const marketPrice = cards.find(card => String(card.id) === String(p.cardId))?.price || 0;
-      const gain = marketPrice * p.qty - p.total;
-      return `<tr><td>${p.date}</td><td><strong>${p.card}</strong></td><td>${p.printing}</td><td>${p.destination || "Binder Collection"}</td><td>${p.qty}</td><td>${money(p.price)}</td><td>${money(marketPrice)}</td><td>${money(p.total)}</td><td class="${gain >= 0 ? "green" : "red"}">${gain >= 0 ? "+" : ""}${money(gain)}</td><td>${p.seller}</td><td><button class="btn" onclick="deletePurchase('${escapeHtml(p.id)}')">Delete</button></td></tr>`;
-    })()
-  ).join("") || `<tr><td colspan="11" class="empty">No purchases recorded.</td></tr>`;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, ch => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
-  }[ch]));
-}
-
-function stripHtml(value) {
-  const element = document.createElement("div");
-  element.innerHTML = String(value ?? "");
-  return (element.textContent || "").replace(/\s+/g, " ").trim();
-}
-
-function getCardText(value) {
-  const text = stripHtml(value);
-  const description = text.match(/\bDescription:\s*(.*)$/i);
-  if (description) return description[1].trim();
-
-  const def = text.match(/\bDEF:\s*[^ ]+\s*(.*)$/i);
-  if (def) return def[1].trim();
-
-  return text;
-}
-
-function isAllowedLanguage(product, variant) {
-  const haystack = [
-    product.sourceLanguage || "",
-    product.title,
-    product.handle,
-    ...(product.tags || []),
-    product.body_html || "",
-    variant.title || ""
-  ].join(" ").toLowerCase();
-
-  return /asian[- ]english|asia[- ]english|japanese|\bocg[- ]jp\b|\bjp[- ]ocg\b/.test(haystack);
-}
-
-function getCardCode(name) {
-  const match = String(name || "").match(/\b[A-Z0-9]+-[A-Z0-9]+\b/i);
-  return match ? match[0].toUpperCase() : "";
-}
-
-function getCardRarity(value) {
-  const rarityCodes = Object.keys(TCGC_RAR).sort((a, b) => b.length - a.length).join("|");
-  const text = String(value || "").toUpperCase();
-  const explicitMatch = text.match(new RegExp(`\\bRARITY:\\s*(${rarityCodes})\\b`));
-  const parenthesizedMatch = text.match(new RegExp(`\\(\\s*(${rarityCodes})\\s*\\)`));
-  const match = explicitMatch || parenthesizedMatch || text.match(new RegExp(`(?:^|[^A-Z0-9])(${rarityCodes})(?:$|[^A-Z0-9])`));
-  return match ? TCGC_RAR[match[1]] : "Other";
-}
-
-function getCardName(title) {
-  const rarityCodes = Object.keys(TCGC_RAR).join("|");
-  return String(title || "")
-    .replace(/^\s*[A-Z0-9]+-[A-Z0-9]+\s+/i, "")
-    .replace(new RegExp(`\\s+\\((?:${rarityCodes}|Prismatic Secret Rare)\\)`, "ig"), "")
-    .replace(/\s+\(Status[^)]*\)/i, "")
-    .trim();
-}
-
-function renderCards() {
-  const q = document.getElementById("cardSearch").value.toLowerCase().trim();
-  const grid = document.getElementById("cardGrid");
-
-  if (tcgLoading) {
-    grid.innerHTML = `<div class="card empty" style="grid-column:1/-1;">Loading Yu-Gi-Oh products from TCG Corner...</div>`;
-    return;
-  }
-
-  if (tcgError) {
-    grid.innerHTML = `<div class="card empty" style="grid-column:1/-1;">
-      <strong>Unable to load TCG Corner</strong><br><br>${escapeHtml(tcgError)}
-      <br><br><button class="btn primary" onclick="loadTCGProducts()">Retry</button>
-    </div>`;
-    return;
-  }
-
-  const groups = new Map();
-  cards.forEach(card => {
-    const groupKey = `${card.sourceLanguage}|${card.cardCode || card.productId}`;
-    if (!groups.has(groupKey)) groups.set(groupKey, []);
-    groups.get(groupKey).push(card);
-  });
-
-  const filteredGroups = [...groups.values()].filter(variants => variants.some(card =>
-    card.name.toLowerCase().includes(q) ||
-    card.cardCode.toLowerCase().includes(q) ||
-    card.variantTitle.toLowerCase().includes(q) ||
-    card.rarity.toLowerCase().includes(q) ||
-    card.tags.toLowerCase().includes(q)
-  ));
-
-  grid.innerHTML = filteredGroups.map(variants => {
-    const card = variants[0];
-    const rarityOptions = [...new Map(variants.map(variant => [variant.rarity, variant])).values()];
-    return `<div class="card card-item">
-      <div class="card-image">
-      ${card.image ? `<img src="${escapeHtml(card.image)}" alt="${escapeHtml(card.name)}" style="width:100%;height:100%;object-fit:contain;">` : "No image"}
-      </div>
-      <div class="card-info">
-        <strong>${escapeHtml(card.name)}</strong>
-        <small>${escapeHtml(card.cardCode)}</small>
-        <label class="label" style="margin-top:8px;">Rarity
-          <select onchange="updateCardRarity(this)">
-            ${rarityOptions.map(variant => `<option value="${escapeHtml(variant.id)}">${escapeHtml(variant.rarity)}</option>`).join("")}
-          </select>
-        </label>
-        <div style="margin-top:8px;" class="gold card-price">${money(card.price)}</div>
-        <div style="margin-top:6px;" class="label card-stock">${card.available ? "In stock" : "Out of stock"} · TCG Corner</div>
-        <div class="row-actions">
-          <button class="btn primary card-purchase" data-card-id="${escapeHtml(card.id)}" onclick="openPurchaseFor(this.dataset.cardId)">Add Purchase</button>
-          ${card.url ? `<a class="btn card-view" href="${escapeHtml(card.url)}" target="_blank" rel="noopener">View</a>` : ""}
-        </div>
-      </div>
-    </div>`;
-  }).join("") || `<div class="card empty" style="grid-column:1/-1;">No matching Yu-Gi-Oh products found.</div>`;
-}
-
-function updateCardRarity(select) {
-  const card = cards.find(item => String(item.id) === String(select.value));
-  if (!card) return;
-
-  const cardItem = select.closest(".card-item");
-  cardItem.querySelector(".card-price").textContent = money(card.price);
-  cardItem.querySelector(".card-stock").textContent = `${card.available ? "In stock" : "Out of stock"} · TCG Corner`;
-  cardItem.querySelector(".card-purchase").dataset.cardId = card.id;
-  const view = cardItem.querySelector(".card-view");
-  if (view && card.url) view.href = card.url;
-}
-
-function openPurchaseFor(id) {
-  const selectedCard = cards.find(card => String(card.id) === String(id));
-  if (!selectedCard) return;
-  openPurchase();
-  const cardOption = [...document.getElementById("purchaseCard").options].find(option => {
-    const optionCard = cards.find(card => String(card.id) === String(option.value));
-    return optionCard && optionCard.sourceLanguage === selectedCard.sourceLanguage &&
-      (optionCard.cardCode ? optionCard.cardCode === selectedCard.cardCode : optionCard.productId === selectedCard.productId);
-  });
-  if (cardOption) document.getElementById("purchaseCard").value = cardOption.value;
-  document.getElementById("purchaseCardName").value = selectedCard.name;
-  updatePurchaseFields();
-  document.getElementById("purchaseRarity").value = selectedCard.id;
-  updatePurchaseRarity();
-}
-
-async function loadCollectionProducts(feed) {
-  const products = [];
-  const seen = new Set();
-
-  for (let page = 1; page <= 100; page++) {
-    let response;
-    try {
-      response = await fetch(`${feed.url}&page=${page}`, {
-        headers: { "Accept": "application/json" }
-      });
-    } catch (error) {
-      if (page === 1) throw error;
-      break;
-    }
-    if (!response.ok) throw new Error(`TCG Corner returned HTTP ${response.status} for the ${feed.language} collection.`);
-
-    const data = await response.json();
-    const pageProducts = Array.isArray(data.products) ? data.products : [];
-    const newProducts = pageProducts.filter(product => !seen.has(String(product.id)));
-    newProducts.forEach(product => seen.add(String(product.id)));
-    products.push(...newProducts);
-
-    if (pageProducts.length < 250 || newProducts.length === 0) break;
-  }
-
-  return products.map(product => ({ ...product, sourceLanguage: feed.language }));
-}
-
-async function loadTCGProducts() {
-  tcgLoading = true;
-  tcgError = "";
-  renderCards();
-
-  try {
-    let products;
-    try {
-      products = (await Promise.all(TCG_FEEDS.map(loadCollectionProducts))).flat();
-    } catch (collectionError) {
-      const response = await fetch(TCG_GLOBAL_FEED, { headers: { "Accept": "application/json" } });
-      if (!response.ok) throw collectionError;
-      const data = await response.json();
-      products = (Array.isArray(data.products) ? data.products : []).map(product => ({
-        ...product,
-        sourceLanguage: ""
-      }));
-    }
-
-    // The feed contains multiple TCGs and product types. For this prototype,
-    // identify Yu-Gi-Oh products from the product title, handle, tags, and description.
-    const ygoProducts = products.filter(product => {
-      const haystack = [
-        product.title,
-        product.handle,
-        ...(product.tags || []),
-        product.body_html || ""
-      ].join(" ").toLowerCase();
-
-      return product.sourceLanguage === "Asian English" ||
-        product.sourceLanguage === "Japanese" ||
-        /yu-?gi-?oh|yugioh/.test(haystack);
-    });
-
-    cards = ygoProducts.flatMap(product => {
-      const variants = Array.isArray(product.variants) && product.variants.length
-        ? product.variants
-        : [{ id: `${product.id}-default`, title: "Default", price: "0", available: false }];
-
-      const image = product.images?.[0]?.src || "";
-
-      return variants.filter(variant => isAllowedLanguage(product, variant)).map(variant => ({
-        id: String(variant.id),
-        productId: product.id,
-        cardCode: getCardCode(product.title),
-        name: getCardName(product.title),
-        variantTitle: variant.title || "Default",
-        rarity: getCardRarity([
-          product.title,
-          product.body_html || "",
-          ...(product.tags || []),
-          variant.title || ""
-        ].join(" ")),
-        cardText: getCardText(product.body_html || ""),
-        price: Number(variant.price || 0),
-        available: Boolean(variant.available),
-        image,
-        tags: Array.isArray(product.tags) ? product.tags.join(" ") : "",
-        url: product.handle ? `https://tcg-corner.com/products/${product.handle}` : ""
-      }));
-    });
-
-    tcgLoading = false;
-    syncPurchasesToDecks();
-    renderCards();
-    populatePurchaseSelector();
-    renderDecks();
-    renderDashboard();
-    renderSpending();
-    renderSpendingCardMatches();
-    renderCollectionCardMatches();
-  } catch (error) {
-    tcgLoading = false;
-    tcgError = error.message || "The browser could not fetch the feed.";
-    renderCards();
-  }
-}
-
-function populatePurchaseSelector() {
-  const select = document.getElementById("purchaseCard");
-  if (!cards.length) {
-    select.innerHTML = `<option>No Yu-Gi-Oh products loaded</option>`;
-    return;
-  }
-  select.innerHTML = cards.map(c =>
-    `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)} · ${escapeHtml(c.variantTitle)}</option>`
-  ).join("");
-}
-
-renderDashboard();
-renderCollection();
-renderSpending();
-renderDecks();
-renderCards();
-loadTCGProducts();
-</script>
+<script src="script.js"></script>
 </body>
 </html>
