@@ -1024,9 +1024,9 @@ async function showCardDetails(card, deckCardId) {
     // ==========================================
 
     const addButton =
-        document.getElementById("addDetailCardToDeck");
+    document.getElementById("addDetailCardToDeck");
 
-    if (addButton) {
+if (addButton) {
     addButton.onclick = function(event) {
         event.preventDefault();
         event.stopPropagation();
@@ -1047,7 +1047,6 @@ async function showCardDetails(card, deckCardId) {
             quantity = 99;
         }
 
-        // Get selected Asian-English rarity
         const raritySelect =
             document.getElementById("detailCardRaritySelect");
 
@@ -1059,23 +1058,77 @@ async function showCardDetails(card, deckCardId) {
 
         const tcgCornerRarity =
             selectedOption?.dataset?.tcgRarity || "";
-        /*
-        console.log("Selected Asian-English rarity:",
-            asianEnglishRarity);
 
-        console.log("TCG Corner rarity:",
-            tcgCornerRarity);
-        */
-        addCardToDeck(
+
+        const currentCount =
+            getCardCountInDeck(
+                activeDeck,
+                card.id
+            );
+
+        const cardLimit =
+            getCardLimit(card.name);
+
+        console.log(
+            "ADD CHECK:",
+            card.name,
+            "Current:",
+            currentCount,
+            "Selected:",
+            quantity,
+            "Limit:",
+            cardLimit,
+            "Banlist:",
+            activeBanlist
+        );
+
+        // FORBIDDEN
+        if (cardLimit === 0) {
+            showBanlistPopup(
+            "Deck Limit",
+            `${card.name} has reached its ${cardLimit}-copy limit.`
+            );
+            return false;
+        }
+
+        // SELECTED QUANTITY EXCEEDS BANLIST
+        if (currentCount + quantity > cardLimit) {
+            const remaining =
+                Math.max(0, cardLimit - currentCount);
+
+            if (remaining === 0) {
+                showBanlistPopup(
+                "Deck Limit",
+                `${card.name} has reached its ${cardLimit}-copy limit.`
+                );
+    
+            } else {
+                showBanlistPopup(
+                    "Deck Limit Exceeded",
+                    `${card.name} is limited to ${cardLimit} copy/copies.\n\n` +
+                    `Already in deck: ${currentCount}\n` +
+                    `You selected: ${qty}\n` +
+                    `You can add: ${remaining}`
+                );
+            }
+
+            return;
+        }
+
+        const added = addCardToDeck(
             deckCardId,
             quantity,
             asianEnglishRarity,
             tcgCornerRarity
         );
 
+        if (added !== true) {
+            return;
+        }
+
         panel.hidden = true;
     };
-  }
+}
 
     // ==========================================
     // BASIC CARD INFORMATION
@@ -1565,25 +1618,61 @@ function reorderDeckCardCopy(draggedId, targetId, dropBefore) {
   renderDecks();
 }
 
-function addCardToDeck(cardId = selectedDeckCardId,quantity,asianEnglishRarity,tcgCornerRarity) {
-  if (!activeDeck) return;
-  const card = deckApiCards.find(item => String(item.id) === String(cardId));
-  const qty = quantity ?? Number(document.getElementById("deckCardQty").value);
-  if (!card || qty < 1) return;
+function addCardToDeck(
+  cardId = selectedDeckCardId,
+  quantity,
+  asianEnglishRarity,
+  tcgCornerRarity
+) {
+  if (!activeDeck) return false;
 
-  addCardEntryToDeck(activeDeck, card, qty, asianEnglishRarity, tcgCornerRarity);
+  const card = deckApiCards.find(
+    item => String(item.id) === String(cardId)
+  );
+
+  const qty =
+    quantity ??
+    Number(
+      document.getElementById("deckCardQty")?.value
+    );
+
+  if (!card || !Number.isFinite(qty) || qty < 1) {
+    return false;
+  }
+
+  const added = addCardEntryToDeck(
+    activeDeck,
+    card,
+    qty,
+    asianEnglishRarity,
+    tcgCornerRarity
+  );
+
+  if (added !== true) {
+    return false;
+  }
+
   saveData();
   renderDecks();
+
+  return true;
 }
 
+
 function getCardCountInDeck(deckName, cardId) {
+
   const entries = deckCards[deckName] || [];
 
   return entries
-    .filter(entry => String(entry.cardId) === String(cardId))
-    .reduce((total, entry) => {
-      return total + Number(entry.qty || 0);
-    }, 0);
+    .filter(
+      entry =>
+        String(entry.cardId) === String(cardId)
+    )
+    .reduce(
+      (total, entry) =>
+        total + Number(entry.qty || 0),
+      0
+    );
 }
 
 
@@ -1638,65 +1727,68 @@ function getCardLimit(cardName) {
   return 3;
 }
 
-function addCardEntryToDeck(deckName, card, qty, asianEnglishRarity, tcgCornerRarity) {
-  /*console.log("RARITY RECEIVED:", {
-  card: card.name,
+function addCardEntryToDeck(
+  deckName,
+  card,
+  qty,
   asianEnglishRarity,
   tcgCornerRarity
-    }); */
-
-
+) {
   const entries = deckCards[deckName] || (deckCards[deckName] = []);
 
-  const currentCount = getCardCountInDeck(deckName, card.id);
+  const currentCount = getCardCountInDeck(
+    deckName,
+    card.ygoProId || card.id
+  );
 
   const cardLimit = getCardLimit(card.name);
 
-  /*console.log(
-    "Banlist check:",
+  console.log(
+    "BANLIST:",
     card.name,
-    "Banlist:",
-    activeBanlist,
     "Current:",
     currentCount,
+    "Requested:",
+    qty,
     "Limit:",
     cardLimit
-  ); */
+  );
 
+  // FORBIDDEN
   if (cardLimit === 0) {
-    showBanlistPopup(
-    "Card Forbidden",
-    `${card.name} is Forbidden under the ${activeBanlist} banlist.`
-    );
-    return;
+    alert(`${card.name} is Forbidden.`);
+    return false;
   }
 
-  const remaining = cardLimit - currentCount;
-
-  if (remaining <= 0) {
-    showBanlistPopup(
-    "Card Limit Reached",
-    `${card.name} has reached its ${cardLimit}-copy limit under the ${activeBanlist} banlist.`
+  // LIMIT EXCEEDED
+  if (currentCount + qty > cardLimit) {
+    const remaining = Math.max(
+      0,
+      cardLimit - currentCount
     );
+
+    alert(
+      `${card.name} is limited to ${cardLimit} copy/copies.\n\n` +
+      `Already in deck: ${currentCount}\n` +
+      `You selected: ${qty}\n` +
+      `You can add: ${remaining}`
+    );
+
+    return false;
   }
 
-  if (qty > remaining) {
-    qty = remaining;
-
-    showBanlistPopup(
-    "Card Limit",
-    `${card.name} is limited to ${cardLimit} copy/copies under the ${activeBanlist} banlist. Only ${remaining} more can be added.`
-    );
-  }
+  // ONLY ADD AFTER ALL CHECKS PASS
 
   const existing = entries.find(
     entry =>
-      String(entry.cardId) === String(card.id) &&
-      String(entry.rarity || "") === String(tcgCornerRarity || "")
+      String(entry.cardId) ===
+        String(card.ygoProId || card.id) &&
+      String(entry.rarity || "") ===
+        String(tcgCornerRarity || "")
   );
 
   const entry = existing || {
-    cardId: card.id,
+    cardId: card.ygoProId || card.id,
     card: card.name,
     rarity: tcgCornerRarity || "",
     price: card.price,
@@ -1720,9 +1812,14 @@ function addCardEntryToDeck(deckName, card, qty, asianEnglishRarity, tcgCornerRa
   entry.qty = entry.copyIds.length;
 
   const order =
-    deckCardOrder[deckName] || (deckCardOrder[deckName] = []);
+    deckCardOrder[deckName] ||
+    (deckCardOrder[deckName] = []);
 
-  order.push(...entry.copyIds.slice(-qty));
+  order.push(
+    ...entry.copyIds.slice(-qty)
+  );
+
+  return true;
 }
 
 function createDeckCopyId() {
