@@ -63,17 +63,12 @@
       </div>
       <div class="notice">Purchase price is tracked separately from current market value. Adding a purchase also updates your collection quantity.</div>
       <div class="searchbar"><input id="collectionSearch" oninput="renderCollection()" placeholder="Search your collection..."></div>
-      <div class="section card purchase-search-section">
-      
-        <div class="spending-card-matches" id="collectionCardMatches"></div>
-      </div>
       <div class="card"><div class="collection-card-grid" id="collectionTable"></div></div>
     </section>
 
     <section id="spending" class="page">
       <div class="topbar">
         <div><h1>Spend Tracker</h1><div class="subtitle">Track exactly what you paid for your cards.</div></div>
-        <button class="btn primary" onclick="openPurchase()">+ Add Purchase</button>
       </div>
       <div class="grid stats">
         <div class="card"><div class="label">Total Spent</div><div class="value" id="spentTotal"><span id="currencySymbol">₱</span>0</div></div>
@@ -107,22 +102,36 @@
         <div class="card"><div class="label">Deck Value</div><div class="value" id="deckValue"><span id="currencySymbol">₱</span>0</div></div>
         <div class="card"><div class="label">Estimated Cost</div><div class="value" id="deckEstimatedCost">₱0</div></div>
       </div>
-      <div class="section card empty" id="deckList">No decks yet. The deck builder will use the same card and collection database.</div>
       
-
       <div class="banlist-selector">
-        <label for="banlistSelect"><h1>Banlist:</h1></label>
-
+        <label for="banlistSelect"><h2>Select Banlist:</h2></label>
         <select id="banlistSelect">
           <option value="AE">Asian English</option>
           <option value="TCG">TCG</option>
         </select>
-
       </div>
+      <div class="section card empty" id="deckList">No decks yet. The deck builder will use the same card and collection database.</div>
       <div class="section card" id="deckProfile" style="display:none;"></div>
+    </section>
+
+    <section id="market" class="page">
+      <div class="topbar">
+        <div>
+          <h1>Market Place</h1>
+          <div class="subtitle">Input your selling items.</div>
+        </div>
+      </div>
+
+      <div class="searchbar">
+        <input id="cardSearch" oninput="queueCardRender()" placeholder="Search cards...">
+      </div>
+
+      <div class="grid cards" id="cardGrid"></div>
     </section>
   </main>
 </div>
+
+
 
 <div id="banlistPopup" class="banlist-popup-overlay">
   <div class="banlist-popup">
@@ -138,27 +147,6 @@
     </button>
   </div>
 </div>
-
-
-    <section id="market" class="page">
-      <div class="topbar">
-        <div><h1>Market Place</h1><div class="subtitle">Input your selling items.</div></div>
-      </div>
-      <div class="searchbar"><input id="cardSearch" oninput="queueCardRender()" placeholder="Search cards..."></div>
-      <div class="grid cards" id="cardGrid"></div>
-    </section>
-
-    <section id="decks" class="page">
-      <div class="topbar"><div><h1>Market Place</h1><div class="subtitle">Make this your selling binder. </div></div><button class="btn primary" onclick="addDeck()">+ New Deck</button></div>
-      <div class="grid stats">
-        <div class="card"><div class="label">My Decks</div><div class="value" id="deckCount">0</div></div>
-        <div class="card"><div class="label">Cards in Deck</div><div class="value" id="deckMissing">0</div></div>
-        <div class="card"><div class="label">Deck Value</div><div class="value" id="deckValue"><span id="currencySymbol">₱</span>0</div></div>
-        <div class="card"><div class="label">Estimated Cost</div><div class="value" id="deckEstimatedCost">₱0</div></div>
-      </div>
-      <div class="section card empty" id="deckList">No decks yet. The deck builder will use the same card and collection database.</div>
-      <div class="section card" id="deckProfile" style="display:none;"></div>
-    </section>
   </main>
 </div>
 
@@ -171,12 +159,14 @@
       <div class="purchase-card-preview" id="purchaseCardPreview"><div class="card-image">No image</div></div>
       <div class="form-grid">
       <label>Card Name
-        <input id="purchaseCardName" list="purchaseCardOptions" oninput="findPurchaseCard()" placeholder="Type card name or card code...">
+        <input id="purchaseCardName" oninput="findPurchaseCard()" placeholder="Type card name or card code...">
         <datalist id="purchaseCardOptions"></datalist>
         <select id="purchaseCard" style="display:none;"></select>
       </label>
       <label>Rarity
-        <select id="purchaseRarity"></select>
+        <select id="purchaseRarity" onchange="updatePurchaseRarity()">
+            <option value="">Select Rarity</option>
+        </select>
       </label>
       <label>Put in
         <select id="purchaseDestination">
@@ -218,6 +208,8 @@
     </div>
   </div>
 </div>
+
+
 
 <div id="cardDetailsPanel" class="card-details-panel" hidden>
 
@@ -268,6 +260,7 @@
                 <span id="detailCardRarity"></span>
             </p>
 
+
             <div class="card-details-description">
                 <strong>Description</strong>
                 <p id="detailCardDescription"></p>
@@ -307,6 +300,7 @@
         </div>
     </div>
 </div>
+
 
 
 <script src="script.js"></script>
