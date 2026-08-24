@@ -154,10 +154,6 @@ function updateCurrencyDisplay() {
 }
 
 
-
-
-
-
 /*
 async function testCardsJson() {
     console.log("TESTING cards.json");
@@ -1734,11 +1730,17 @@ function addCardEntryToDeck(
   asianEnglishRarity,
   tcgCornerRarity
 ) {
-  const entries = deckCards[deckName] || (deckCards[deckName] = []);
+  const entries =
+    deckCards[deckName] ||
+    (deckCards[deckName] = []);
+
+  qty = Number(qty) || 1;
+
+  const cardId = card.ygoProId || card.id;
 
   const currentCount = getCardCountInDeck(
     deckName,
-    card.ygoProId || card.id
+    cardId
   );
 
   const cardLimit = getCardLimit(card.name);
@@ -1756,23 +1758,33 @@ function addCardEntryToDeck(
 
   // FORBIDDEN
   if (cardLimit === 0) {
-    alert(`${card.name} is Forbidden.`);
+    showBanlistPopup(
+      "Card Forbidden",
+      `${card.name} is forbidden on the selected banlist and cannot be added to the deck.`
+    );
+
     return false;
   }
 
-  // LIMIT EXCEEDED
+  // SELECTED QUANTITY EXCEEDS BANLIST LIMIT
   if (currentCount + qty > cardLimit) {
-    const remaining = Math.max(
-      0,
-      cardLimit - currentCount
-    );
+    const remaining =
+      Math.max(0, cardLimit - currentCount);
 
-    alert(
-      `${card.name} is limited to ${cardLimit} copy/copies.\n\n` +
-      `Already in deck: ${currentCount}\n` +
-      `You selected: ${qty}\n` +
-      `You can add: ${remaining}`
-    );
+    if (remaining === 0) {
+      showBanlistPopup(
+        "Deck Limit",
+        `${card.name} has reached its ${cardLimit}-copy limit.`
+      );
+    } else {
+      showBanlistPopup(
+        "Deck Limit Exceeded",
+        `${card.name} is limited to ${cardLimit} copy/copies.\n\n` +
+        `Already in deck: ${currentCount}\n` +
+        `You selected: ${qty}\n` +
+        `You can add: ${remaining}`
+      );
+    }
 
     return false;
   }
@@ -1781,23 +1793,24 @@ function addCardEntryToDeck(
 
   const existing = entries.find(
     entry =>
-      String(entry.cardId) ===
-        String(card.ygoProId || card.id) &&
+      String(entry.cardId) === String(cardId) &&
       String(entry.rarity || "") ===
         String(tcgCornerRarity || "")
   );
 
-  const entry = existing || {
-    cardId: card.ygoProId || card.id,
-    card: card.name,
-    rarity: tcgCornerRarity || "",
-    price: card.price,
-    cardText: card.cardText,
-    image: card.image,
-    cardCode: card.cardCode,
-    qty: 0,
-    copyIds: []
-  };
+  const entry =
+    existing ||
+    {
+      cardId: cardId,
+      card: card.name,
+      rarity: tcgCornerRarity || "",
+      price: card.price,
+      cardText: card.cardText,
+      image: card.image,
+      cardCode: card.cardCode,
+      qty: 0,
+      copyIds: []
+    };
 
   if (!existing) {
     entries.push(entry);
@@ -1806,7 +1819,9 @@ function addCardEntryToDeck(
   ensureEntryCopyIds(entry);
 
   for (let index = 0; index < qty; index++) {
-    entry.copyIds.push(createDeckCopyId());
+    entry.copyIds.push(
+      createDeckCopyId()
+    );
   }
 
   entry.qty = entry.copyIds.length;
@@ -2050,18 +2065,117 @@ function renderDashboard() {
 }
 
 function renderCollection() {
-  const q = document.getElementById("collectionSearch").value.toLowerCase();
-  const rows = collectionRows().filter(r => r.card.toLowerCase().includes(q));
-  document.getElementById("collectionTable").innerHTML = rows.map(r => {
-    const card = cards.find(c => String(c.id) === String(r.cardId));
-    const market = (cards.find(c=>String(c.id)===String(r.cardId))?.price || 0) * r.qty;
-    return `<div class="collection-card-tile">
-      ${card?.image ? `<img src="${escapeHtml(card.image)}" alt="${escapeHtml(r.card)}">` : `<div class="card-image">No image</div>`}
-      <span class="collection-card-quantity">×${r.qty}</span>
-      <button class="collection-card-delete" title="Delete card" onclick="deleteCollectionGroup('${escapeHtml(r.cardId)}','${escapeHtml(r.printing)}','${escapeHtml(r.destination)}')">×</button>
-      <div class="collection-card-details"><strong>${escapeHtml(r.card)}</strong><small>${escapeHtml(r.printing)} · ${escapeHtml(r.destination)} · ${money(market)}</small></div>
-    </div>`;
-  }).join("") || `<div class="empty" style="grid-column:1/-1;">No cards in your collection.</div>`;
+  const q = document
+    .getElementById("collectionSearch")
+    .value
+    .toLowerCase();
+
+  const rows = collectionRows()
+    .filter(r =>
+      r.card.toLowerCase().includes(q)
+    );
+
+  document.getElementById("collectionTable").innerHTML =
+    rows.map(r => {
+
+      const card = cards.find(
+        c => String(c.id) === String(r.cardId)
+      );
+
+      const market =
+        (card?.price || 0) * r.qty;
+
+      /*
+       * Get the card's limit from the active banlist.
+       *
+       * 0 = Forbidden
+       * 1 = Limited
+       * 2 = Semi-Limited
+       * 3 = Unlimited
+       */
+      const cardLimit = getCardLimit(r.card);
+
+      let banlistClass = "banlist-unlimited";
+      let banlistText = "3";
+
+      if (cardLimit === 0) {
+        banlistClass = "banlist-forbidden";
+        banlistText = "0";
+      } else if (cardLimit === 1) {
+        banlistClass = "banlist-limited";
+        banlistText = "1";
+      } else if (cardLimit === 2) {
+        banlistClass = "banlist-semi-limited";
+        banlistText = "2";
+      }
+
+      return `
+        <div class="collection-card-tile">
+
+          ${
+            card?.image
+              ? `
+                <img
+                  src="${escapeHtml(card.image)}"
+                  alt="${escapeHtml(r.card)}"
+                >
+              `
+              : `
+                <div class="card-image">
+                  No image
+                </div>
+              `
+          }
+
+          <span
+            class="collection-card-quantity ${banlistClass}"
+            title="${
+              cardLimit === 0
+                ? "Forbidden"
+                : cardLimit === 1
+                  ? "Limited"
+                  : cardLimit === 2
+                    ? "Semi-Limited"
+                    : "Unlimited"
+            }"
+          >
+            ${banlistText}
+          </span>
+
+          <button
+            class="collection-card-delete"
+            title="Delete card"
+            onclick="deleteCollectionGroup(
+              '${escapeHtml(r.cardId)}',
+              '${escapeHtml(r.printing)}',
+              '${escapeHtml(r.destination)}'
+            )"
+          >
+            ×
+          </button>
+
+          <div class="collection-card-details">
+            <strong>${escapeHtml(r.card)}</strong>
+            <small>
+              ${escapeHtml(r.printing)}
+              ·
+              ${escapeHtml(r.destination)}
+              ·
+              ${money(market)}
+            </small>
+          </div>
+
+        </div>
+      `;
+    }).join("") ||
+    `
+      <div
+        class="empty"
+        style="grid-column:1/-1;"
+      >
+        No cards in your collection.
+      </div>
+    `;
 }
 
 function queuePurchaseMatchRender(type) {
@@ -2434,28 +2548,94 @@ async function loadBanlists() {
 
     banlists = await response.json();
 
+
+    /* 
     console.log("Banlists loaded:", banlists);
     console.log("Available banlists:", Object.keys(banlists));
+    */
 
     const banlistSelect = document.getElementById("banlistSelect");
 
     if (banlistSelect) {
-      activeBanlist = banlistSelect.value;
+      /*
+       * Make sure the selected value exists
+       * in the loaded banlists.
+       */
+      if (banlists[banlistSelect.value]) {
+        activeBanlist = banlistSelect.value;
+      } else {
+        /*
+         * Fall back to the first available banlist.
+         */
+        const firstBanlist = Object.keys(banlists)[0];
+
+        if (firstBanlist) {
+          activeBanlist = firstBanlist;
+          banlistSelect.value = firstBanlist;
+        }
+      }
+
+      console.log("Active banlist:", activeBanlist);
     }
 
     banlistsLoaded = true;
 
   } catch (error) {
-    console.error("Failed to load banlists:", error);
+    /* console.error("Failed to load banlists:", error); */
     banlistsLoaded = false;
   }
 }
 
+
+function setActiveBanlist(value) {
+  const selectedBanlist = String(value || "").trim();
+
+  if (!selectedBanlist) {
+    /* console.error("No banlist selected."); */
+    return false;
+  }
+
+  if (!banlists || !banlists[selectedBanlist]) {
+    console.error(
+      "Banlist not found:",
+      selectedBanlist,
+      "Available:",
+      Object.keys(banlists || {})
+    );
+
+    return false;
+  }
+
+  activeBanlist = selectedBanlist;
+
+  /* console.log("Active banlist changed to:", activeBanlist); */
+
+  return true;
+}
+
+
 function getCardLimit(cardName) {
+  /*
+   * Always read the current select value first.
+   * This prevents activeBanlist from becoming stale
+   * when the user changes the banlist.
+   */
+  const banlistSelect = document.getElementById("banlistSelect");
+
+  if (banlistSelect && banlistSelect.value) {
+    activeBanlist = banlistSelect.value;
+  }
+
   const banlist = banlists[activeBanlist];
 
   if (!banlist) {
-    console.error("Banlist not found:", activeBanlist);
+    console.error(
+      "Banlist not found:",
+      activeBanlist,
+      "Available:",
+      Object.keys(banlists || {})
+    );
+
     return 3;
   }
 
@@ -2464,15 +2644,21 @@ function getCardLimit(cardName) {
     .toLowerCase();
 
   const forbidden = (banlist.Forbidden || []).map(card =>
-    String(card).trim().toLowerCase()
+    String(card)
+      .trim()
+      .toLowerCase()
   );
 
   const limited = (banlist.Limited || []).map(card =>
-    String(card).trim().toLowerCase()
+    String(card)
+      .trim()
+      .toLowerCase()
   );
 
   const semiLimited = (banlist["Semi-Limited"] || []).map(card =>
-    String(card).trim().toLowerCase()
+    String(card)
+      .trim()
+      .toLowerCase()
   );
 
   if (forbidden.includes(name)) {
@@ -2490,6 +2676,8 @@ function getCardLimit(cardName) {
   return 3;
 }
 
+
+
 function showBanlistPopup(title, message) {
   const popup = document.getElementById("banlistPopup");
   const popupTitle = document.getElementById("banlistPopupTitle");
@@ -2506,6 +2694,7 @@ function showBanlistPopup(title, message) {
   popup.classList.add("show");
 }
 
+
 function closeBanlistPopup() {
   const popup = document.getElementById("banlistPopup");
 
@@ -2514,22 +2703,64 @@ function closeBanlistPopup() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", function () {
-  const closeButton = document.getElementById("banlistPopupClose");
 
-  if (closeButton) {
-    closeButton.addEventListener("click", closeBanlistPopup);
+document.addEventListener("DOMContentLoaded", function () {
+
+  const banlistSelect = document.getElementById("banlistSelect");
+
+  if (banlistSelect) {
+
+    banlistSelect.addEventListener("change", function () {
+
+      const changed = setActiveBanlist(this.value);
+
+      if (!changed) {
+        return;
+      }
+
+      /*
+       * If a deck is currently open, re-check its cards
+       * against the newly selected banlist.
+       */
+      if (typeof activeDeckName !== "undefined" && activeDeckName) {
+
+        if (typeof renderDeck === "function") {
+          renderDeck();
+        }
+
+        if (typeof updateDeckStats === "function") {
+          updateDeckStats();
+        }
+      }
+
+    });
   }
 
-  const popup = document.getElementById("banlistPopup");
+
+  const closeButton =
+    document.getElementById("banlistPopupClose");
+
+  if (closeButton) {
+    closeButton.addEventListener(
+      "click",
+      closeBanlistPopup
+    );
+  }
+
+
+  const popup =
+    document.getElementById("banlistPopup");
 
   if (popup) {
     popup.addEventListener("click", function (event) {
+
       if (event.target === popup) {
         closeBanlistPopup();
       }
+
     });
   }
+
 });
 
 // Detect country when the page loads
