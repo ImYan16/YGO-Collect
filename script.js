@@ -345,12 +345,14 @@ const TCG_FEEDS = [
   }
 ];
 const TCG_GLOBAL_FEED = "https://tcg-corner.com/products.json";
+const TCG_CORNER_CACHE_KEY = "ygoTCGCornerCards";
 
 const TCGC_RAR = {
   C: "C",
   N: "C", 
   NR: "C",
-  "Normal Parallel Rare":"NPR", 
+  "Normal Parallel Rare":"P-R",
+   "Normal Parallel Rare":"NPR",
   "Common": "C", 
   R: "R",
   "Rare":"R",
@@ -835,7 +837,7 @@ function renderDeckProfile() {
             <button class="deck-list-remove" title="Remove one copy" onclick="removeCardFromDeck('${escapeHtml(copyId)}')">×</button>
             <div class="deck-list-tooltip">
               <strong>${escapeHtml(name)}</strong>
-              <small>${escapeHtml(card?.cardCode || "")} · ${escapeHtml(rarity)} · ${money(entry.tcgCornerPrice ?? entry.price ?? 0)}</small>
+              <small>${escapeHtml(card?.cardCode || "")} · ${escapeHtml(rarity)} · ${money(entry.purchasePrice ?? entry.tcgCornerPrice ?? entry.price ?? 0)}</small>
               <div class="deck-list-tooltip-label">Card text</div>
               <p>${escapeHtml(card?.cardText || entry.cardText || "Card text unavailable.")}</p>
             </div>
@@ -1254,7 +1256,7 @@ async function showCardDetails(card) {
       event.preventDefault();
 
       if (!activeDeck) {
-        alert("Select or create a deck first.");
+        showAppAlert("Select or create a deck first.");
         return;
       }
 
@@ -1278,7 +1280,7 @@ async function showCardDetails(card) {
       );
 
       if (!printing) {
-        alert("Select a valid set and rarity.");
+        showAppAlert("Select a valid set and rarity.");
         return;
       }
 
@@ -1645,7 +1647,8 @@ function addCardEntryToDeck(
   asianEnglishRarity = "",
   tcgCornerRarity = "",
   selectedSet = "",
-  selectedRegion = ""
+  selectedRegion = "",
+  purchasePrice = null
 ) {
   qty = Number(qty) || 1;
 
@@ -1735,6 +1738,10 @@ function addCardEntryToDeck(
     String(entry.rarity || "") === String(printing.rarity || "")
   );
 
+  const enteredPrice = purchasePrice === null || purchasePrice === undefined || purchasePrice === ""
+    ? Number.NaN
+    : Number(purchasePrice);
+
   const entry = existing || {
     cardId,
     card: localCard.name,
@@ -1742,12 +1749,17 @@ function addCardEntryToDeck(
     setCode: printing.code,
     region: printing.region,
     rarity: printing.rarity,
-    price: getDeckCardPrice(
-      localCard,
-      selectedRarity,
-      printing.set,
-      printing.region
-    ),
+    price: Number.isFinite(enteredPrice) && enteredPrice >= 0
+      ? enteredPrice
+      : getDeckCardPrice(
+          localCard,
+          selectedRarity,
+          printing.set,
+          printing.region
+        ),
+    purchasePrice: Number.isFinite(enteredPrice) && enteredPrice >= 0
+      ? enteredPrice
+      : null,
     tcgCornerPrice: null,
     cardText: localCard.cardText || localCard.desc || "",
     image: localCard.image ||
@@ -1758,6 +1770,11 @@ function addCardEntryToDeck(
   };
 
   if (!existing) entries.push(entry);
+
+  if (existing && Number.isFinite(enteredPrice) && enteredPrice >= 0) {
+    existing.purchasePrice = enteredPrice;
+    existing.price = enteredPrice;
+  }
 
   ensureEntryCopyIds(entry);
 
@@ -1841,11 +1858,11 @@ function removeQuantityFromDeck(deckName, cardId, qty) {
   deckCardOrder[deckName] = (deckCardOrder[deckName] || []).filter(id => !removedCopyIds.includes(id));
 }
 
-function deletePurchase(purchaseId) {
+async function deletePurchase(purchaseId) {
   const index = purchases.findIndex(purchase => String(purchase.id) === String(purchaseId));
   if (index < 0) return;
   const purchase = purchases[index];
-  if (!confirm(`Delete the purchase of ${purchase.card}?`)) return;
+  if (!await showAppConfirm(`Delete the purchase of ${purchase.card}?`)) return;
   purchases.splice(index, 1);
   if (purchase.destination?.startsWith("Deck: ")) {
     removeQuantityFromDeck(purchase.destination.slice("Deck: ".length), purchase.cardId, purchase.qty);
@@ -1857,13 +1874,13 @@ function deletePurchase(purchaseId) {
   renderDecks();
 }
 
-function deleteCollectionGroup(cardId, printing, destination) {
+async function deleteCollectionGroup(cardId, printing, destination) {
   const matching = purchases.filter(purchase =>
     String(purchase.cardId) === String(cardId) &&
-    purchase.printing === printing &&
+    getPurchasePrintingLabel(purchase) === printing &&
     (purchase.destination || "Binder Collection") === destination
   );
-  if (!matching.length || !confirm(`Delete all ${matching.reduce((sum, purchase) => sum + purchase.qty, 0)} copies of this card?`)) return;
+  if (!matching.length || !await showAppConfirm(`Delete all ${matching.reduce((sum, purchase) => sum + purchase.qty, 0)} copies of this card?`)) return;
   purchases = purchases.filter(purchase => !matching.includes(purchase));
   if (destination.startsWith("Deck: ")) {
     removeQuantityFromDeck(destination.slice("Deck: ".length), cardId, matching.reduce((sum, purchase) => sum + purchase.qty, 0));
@@ -1879,7 +1896,7 @@ function openPurchase() {
   const select = document.getElementById("purchaseCard");
   if (!cards.length) {
     if (!tcgLoading) loadTCGProducts();
-    alert("Loading the TCG Corner catalog. Please try Add Purchase again in a moment.");
+    showAppAlert("Loading the TCG Corner catalog. Please try Add Purchase again in a moment.");
     return;
   }
   populatePurchaseDestinations();
@@ -1940,6 +1957,13 @@ document.getElementById("purchaseCard").addEventListener("change", updatePurchas
 document.getElementById("purchaseRarity").addEventListener("change", updatePurchaseRarity);
 function closePurchase() { document.getElementById("purchaseModal").classList.remove("open"); }
 
+function getPurchasePrintingLabel(purchase) {
+  const card = cards.find(item => String(item.id) === String(purchase?.cardId));
+  const set = purchase?.set || getSetCode(card?.cardCode) || card?.cardCode || "Unknown set";
+  const rarity = purchase?.rarity || card?.rarity || purchase?.printing || "Unknown rarity";
+  return `${set} · ${rarity}`;
+}
+
 function savePurchase() {
   const card = cards.find(c => c.id == document.getElementById("purchaseRarity").value);
   const qty = Number(document.getElementById("purchaseQty").value);
@@ -1950,7 +1974,13 @@ function savePurchase() {
     id: Date.now(),
     cardId: card.id,
     card: card.name,
-    printing: card.rarity,
+    printing: getPurchasePrintingLabel({
+      cardId: card.id,
+      set: getSetCode(card.cardCode) || card.cardCode,
+      rarity: card.rarity
+    }),
+    set: getSetCode(card.cardCode) || card.cardCode || "Unknown set",
+    rarity: card.rarity || "Unknown rarity",
     destination,
     qty,
     price,
@@ -1960,7 +1990,18 @@ function savePurchase() {
   });
   if (destination.startsWith("Deck: ")) {
     const deckName = destination.slice("Deck: ".length);
-    if (decks.includes(deckName)) addCardEntryToDeck(deckName, card, qty);
+    if (decks.includes(deckName)) {
+      addCardEntryToDeck(
+        deckName,
+        card,
+        qty,
+        card.rarity,
+        getTcgCornerRarity(card.rarity),
+        "",
+        "",
+        price
+      );
+    }
   }
   saveData();
   closePurchase();
@@ -1972,8 +2013,9 @@ function collectionRows() {
   const map = {};
   purchases.forEach(p => {
     const destination = p.destination || "Binder Collection";
-    const key = p.cardId + "|" + p.printing + "|" + destination;
-    if(!map[key]) map[key] = {cardId:p.cardId,card:p.card,printing:p.printing,destination,qty:0,paid:0};
+    const printing = getPurchasePrintingLabel(p);
+    const key = p.cardId + "|" + printing + "|" + destination;
+    if(!map[key]) map[key] = {cardId:p.cardId,card:p.card,printing,destination,qty:0,paid:0};
     map[key].qty += Number(p.qty || 0);
     map[key].paid += p.total;
   });
@@ -2203,7 +2245,7 @@ function renderSpending() {
     (() => {
       const marketPrice = cards.find(card => String(card.id) === String(p.cardId))?.price || 0;
       const gain = marketPrice * Number(p.qty || 0) - p.total;
-      return `<tr><td>${p.date}</td><td>${p.card}</td><td>${p.qty}</td><td>${money(p.price)}</td><td>${money(marketPrice)}</td><td>${money(p.total)}</td><td class="${gain >= 0 ? "green" : "red"}">${gain >= 0 ? "+" : ""}${money(gain)}</td><td>${p.seller}</td><td><button class="btn" onclick="deletePurchase('${escapeHtml(p.id)}')">Delete</button></td></tr>`;
+      return `<tr><td>${p.date}</td><td>${p.card}</td><td>${escapeHtml(getPurchasePrintingLabel(p))}</td><td>${escapeHtml(p.destination || "Binder Collection")}</td><td>${p.qty}</td><td>${money(p.price)}</td><td>${money(marketPrice)}</td><td>${money(p.total)}</td><td class="${gain >= 0 ? "green" : "red"}">${gain >= 0 ? "+" : ""}${money(gain)}</td><td>${escapeHtml(p.seller || "—")}</td><td><button class="btn" onclick="deletePurchase('${escapeHtml(p.id)}')">Delete</button></td></tr>`;
     })()
   ).join("") || `<tr><td colspan="11" class="empty">No purchases recorded.</td></tr>`;
 }
@@ -2387,14 +2429,23 @@ async function loadCollectionProducts(feed) {
 
   for (let page = 1; page <= 100; page++) {
     let response;
-    try {
-      response = await fetch(`${feed.url}&page=${page}`, {
-        headers: { "Accept": "application/json" }
-      });
-    } catch (error) {
-      if (page === 1) throw error;
-      break;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await fetch(`${feed.url}&page=${page}`, {
+          headers: { "Accept": "application/json" }
+        });
+      } catch (error) {
+        if (page === 1) throw error;
+        break;
+      }
+
+      if (response.status !== 429 || attempt === 2) break;
+
+      const retryAfter = Number(response.headers.get("Retry-After")) || 2;
+      await new Promise(resolve => setTimeout(resolve, Math.min(retryAfter * 1000, 10000)));
     }
+    if (!response) break;
+    if (response.status === 429 && page > 1) break;
     if (!response.ok) throw new Error(`TCG Corner returned HTTP ${response.status} for the ${feed.language} collection.`);
 
     const data = await response.json();
@@ -2409,10 +2460,18 @@ async function loadCollectionProducts(feed) {
   return products.map(product => ({ ...product, sourceLanguage: feed.language }));
 }
 
-async function loadTCGProducts() {
+async function loadTCGProducts(forceRefresh = false) {
   tcgLoading = true;
   tcgError = "";
   renderCards();
+
+  if (!forceRefresh) {
+    const cachedProducts = getCachedTCGProducts();
+    if (cachedProducts) {
+      finishTCGProductLoad(cachedProducts, false);
+      return;
+    }
+  }
 
   try {
     let products;
@@ -2443,7 +2502,7 @@ async function loadTCGProducts() {
         /yu-?gi-?oh|yugioh/.test(haystack);
     });
 
-    cards = ygoProducts.flatMap(product => {
+    const nextCards = ygoProducts.flatMap(product => {
       const variants = Array.isArray(product.variants) && product.variants.length
         ? product.variants
         : [{ id: `${product.id}-default`, title: "Default", price: "0", available: false }];
@@ -2470,21 +2529,65 @@ async function loadTCGProducts() {
         url: product.handle ? `https://tcg-corner.com/products/${product.handle}` : ""
       }));
     });
-    purchaseSearchCache.clear();
-
-    tcgLoading = false;
-    syncPurchasesToDecks();
-    renderCards();
-    populatePurchaseSelector();
-    renderDecks();
-    renderDashboard();
-    renderSpending();
-    renderSpendingCardMatches();
-    renderCollectionCardMatches();
+    finishTCGProductLoad(nextCards);
   } catch (error) {
     tcgLoading = false;
     tcgError = error.message || "The browser could not fetch the feed.";
     renderCards();
+  }
+}
+
+function getCachedTCGProducts() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(TCG_CORNER_CACHE_KEY) || "null");
+    return Array.isArray(cached?.cards) && cached.cards.length ? cached.cards : null;
+  } catch (error) {
+    console.warn("Unable to read the TCG Corner cache:", error);
+    return null;
+  }
+}
+
+function cacheTCGProducts(products) {
+  try {
+    localStorage.setItem(TCG_CORNER_CACHE_KEY, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      cards: products
+    }));
+  } catch (error) {
+    console.warn("Unable to save the TCG Corner cache:", error);
+  }
+}
+
+function finishTCGProductLoad(products, shouldCache = true) {
+  cards = products;
+  if (shouldCache) cacheTCGProducts(cards);
+  purchaseSearchCache.clear();
+  tcgLoading = false;
+  syncPurchasesToDecks();
+  renderCards();
+  populatePurchaseSelector();
+  renderDecks();
+  renderDashboard();
+  renderSpending();
+  renderSpendingCardMatches();
+  renderCollectionCardMatches();
+  renderMarketplace();
+  renderMarketplaceCards();
+  renderMarketplaceListings();
+}
+
+async function syncTCGCorner() {
+  const button = document.getElementById("syncTCGButton");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Syncing...";
+  }
+
+  await loadTCGProducts(true);
+
+  if (button) {
+    button.disabled = false;
+    button.textContent = tcgError ? "Retry Sync" : "Sync TCG Corner";
   }
 }
 
@@ -2669,7 +2772,7 @@ function showBanlistPopup(title, message) {
   const popupMessage = document.getElementById("banlistPopupMessage");
 
   if (!popup || !popupTitle || !popupMessage) {
-    alert(message);
+    showAppAlert(message);
     return;
   }
 
@@ -2685,6 +2788,50 @@ function closeBanlistPopup() {
 
   if (popup) {
     popup.classList.remove("show");
+  }
+}
+
+function showAppAlert(message, title = "Notice") {
+  const alertDialog = document.getElementById("appAlert");
+  const alertTitle = document.getElementById("appAlertTitle");
+  const alertMessage = document.getElementById("appAlertMessage");
+
+  if (!alertDialog || !alertTitle || !alertMessage) return;
+
+  alertTitle.textContent = title;
+  alertMessage.textContent = message;
+  alertDialog.classList.add("show");
+  document.getElementById("appAlertClose")?.focus();
+}
+
+function closeAppAlert() {
+  document.getElementById("appAlert")?.classList.remove("show");
+}
+
+let appConfirmResolve = null;
+
+function showAppConfirm(message, title = "Confirm") {
+  const dialog = document.getElementById("appConfirm");
+  const dialogTitle = document.getElementById("appConfirmTitle");
+  const dialogMessage = document.getElementById("appConfirmMessage");
+
+  if (!dialog || !dialogTitle || !dialogMessage) return Promise.resolve(false);
+
+  dialogTitle.textContent = title;
+  dialogMessage.textContent = message;
+  dialog.classList.add("show");
+  document.getElementById("appConfirmCancel")?.focus();
+
+  return new Promise(resolve => {
+    appConfirmResolve = resolve;
+  });
+}
+
+function closeAppConfirm(accepted = false) {
+  document.getElementById("appConfirm")?.classList.remove("show");
+  if (appConfirmResolve) {
+    appConfirmResolve(accepted);
+    appConfirmResolve = null;
   }
 }
 
@@ -3213,7 +3360,7 @@ document
 
     const deckName = activeDeck || decks[0];
     if (!deckName) {
-      alert("Create or select a deck first.");
+      showAppAlert("Create or select a deck first.");
       return;
     }
 
@@ -3237,7 +3384,7 @@ document
     );
 
     if (!printing) {
-      alert("No matching card printing was found.");
+      showAppAlert("No matching card printing was found.");
       return;
     }
 
@@ -3314,17 +3461,39 @@ document
     openMarketplace(button.dataset.cardId);
   });
 
+document.getElementById("appAlertClose")
+  ?.addEventListener("click", closeAppAlert);
+
+document.getElementById("appAlert")
+  ?.addEventListener("click", event => {
+    if (event.target.id === "appAlert") closeAppAlert();
+  });
+
+document.getElementById("appConfirmAccept")
+  ?.addEventListener("click", () => closeAppConfirm(true));
+
+document.getElementById("appConfirmCancel")
+  ?.addEventListener("click", () => closeAppConfirm(false));
+
+document.getElementById("appConfirm")
+  ?.addEventListener("click", event => {
+    if (event.target.id === "appConfirm") closeAppConfirm(false);
+  });
+
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  closeAppAlert();
+  closeAppConfirm(false);
+});
+
 loadLocalCardDatabase()
   .then(() => {
     renderDashboard();
     renderCollection();
     renderSpending();
     renderDecks();
-    refreshDeckPrices();
     renderCards();
-    renderMarketplace();
-    renderMarketplaceCards();
-    renderMarketplaceListings();
+    loadTCGProducts();
   })
   .catch(error => console.error(error));
 
