@@ -13,7 +13,7 @@
     <nav>
       <button class="active" data-page="dashboard"><img src="./data/icons/data-analysis.png" alt="Dashboard">Dashboard</button>
       <button data-page="collection"><img src="./data/icons/book.png" alt="Collection"> Collection</button>
-      <button data-page="spending"><span id="currencySymbol">₱</span> Spending</button>
+      <button data-page="spending"><span class="currency-symbol">₱</span> Spending</button>
       <button data-page="cards"><img src="./data/icons/card-games.png" alt="Cards"> Cards</button>
       <button data-page="decks"><img src="./data/icons/stack-cards.png" alt="Decks"> Decks</button>
       <button data-page="market"><img src="./data/icons/basket.png" alt="Market"> Market Place</button>
@@ -28,9 +28,9 @@
       </div>
 
       <div class="grid stats">
-        <div class="card"><div class="label">Collection Value</div><div class="value" id="dashValue"><span id="currencySymbol">₱</span>0</div></div>
-        <div class="card"><div class="label">Total Spent</div><div class="value" id="dashSpent"><span id="currencySymbol">₱</span>0</div></div>
-        <div class="card"><div class="label">Unrealized Gain</div><div class="value green" id="dashGain"><span id="currencySymbol">₱</span>0</div></div>
+        <div class="card"><div class="label">Collection Value</div><div class="value" id="dashValue"><span class="currency-symbol">₱</span>0</div></div>
+        <div class="card"><div class="label">Total Spent</div><div class="value" id="dashSpent"><span class="currency-symbol">₱</span>0</div></div>
+        <div class="card"><div class="label">Unrealized Gain</div><div class="value green" id="dashGain"><span class="currency-symbol">₱</span>0</div></div>
         <div class="card"><div class="label">Cards Owned</div><div class="value" id="dashCards">0</div></div>
       </div>
 
@@ -43,10 +43,10 @@
         </div>
         <div class="card">
           <div class="section-head"><h2>Spending</h2><span class="pill">This month</span></div>
-          <div class="value" id="monthSpent"><span id="currencySymbol">₱</span>0</div>
+          <div class="value" id="monthSpent"><span class="currency-symbol">₱</span>0</div>
           <div class="subtitle">Purchases recorded this month</div>
           <div style="margin-top:25px;" class="label">Average purchase</div>
-          <div class="value" id="avgPurchase"><span id="currencySymbol">₱</span>0</div>
+          <div class="value" id="avgPurchase"><span class="currency-symbol">₱</span>0</div>
         </div>
       </div>
 
@@ -71,10 +71,10 @@
         <div><h1>Spend Tracker</h1><div class="subtitle">Track exactly what you paid for your cards.</div></div>
       </div>
       <div class="grid stats">
-        <div class="card"><div class="label">Total Spent</div><div class="value" id="spentTotal"><span id="currencySymbol">₱</span>0</div></div>
-        <div class="card"><div class="label">This Month</div><div class="value" id="spentMonth"><span id="currencySymbol">₱</span>0</div></div>
+        <div class="card"><div class="label">Total Spent</div><div class="value" id="spentTotal"><span class="currency-symbol">₱</span>0</div></div>
+        <div class="card"><div class="label">This Month</div><div class="value" id="spentMonth"><span class="currency-symbol">₱</span>0</div></div>
         <div class="card"><div class="label">Purchases</div><div class="value" id="purchaseCount">0</div></div>
-        <div class="card"><div class="label">Average Purchase</div><div class="value" id="purchaseAverage"><span id="currencySymbol">₱</span>0</div></div>
+        <div class="card"><div class="label">Average Purchase</div><div class="value" id="purchaseAverage"><span class="currency-symbol">₱</span>0</div></div>
       </div>
       <div class="section card purchase-search-section">
         <div class="section-head"><h2>Add Card Purchase</h2><div class="purchase-search"><input id="spendingCardSearch" oninput="queuePurchaseMatchRender('spending')" placeholder="Search card..."></div></div>
@@ -99,15 +99,17 @@
       <div class="grid stats">
         <div class="card"><div class="label">My Decks</div><div class="value" id="deckCount">0</div></div>
         <div class="card"><div class="label">Cards in Deck</div><div class="value" id="deckMissing">0</div></div>
-        <div class="card"><div class="label">Deck Value</div><div class="value" id="deckValue"><span id="currencySymbol">₱</span>0</div></div>
+        <div class="card"><div class="label">Deck Value</div><div class="value" id="deckValue"><span class="currency-symbol">₱</span>0</div></div>
         <div class="card"><div class="label">Estimated Cost</div><div class="value" id="deckEstimatedCost">₱0</div></div>
       </div>
+      
       
       <div class="banlist-selector">
         <label for="banlistSelect"><h2>Select Banlist:</h2></label>
         <select id="banlistSelect">
           <option value="AE">Asian English</option>
           <option value="TCG">TCG</option>
+          <option value="OCG">OCG</option>
         </select>
       </div>
       <div class="section card empty" id="deckList">No decks yet. The deck builder will use the same card and collection database.</div>
@@ -122,11 +124,51 @@
         </div>
       </div>
 
-      <div class="searchbar">
-        <input id="cardSearch" oninput="queueCardRender()" placeholder="Search cards...">
+      <div class="searchbar market-searchbar">
+        <input id="marketCardSearch"
+              oninput="renderMarketplace()"
+              placeholder="Search cards...">
       </div>
+      <section class="section card">
+        <h2>Your Listings</h2>
+        <div id="marketplaceListings" class="grid cards marketplace-listings"></div>
+        
+      </section>
+      <div id="marketCardGrid" class="grid cards"></div>
+      <div class="modal" id="marketplaceModal">
+        <input id="marketplaceCardId" type="hidden">
+      <div class="modal-box">
+        <h2>List Card for Sale</h2>
 
-      <div class="grid cards" id="cardGrid"></div>
+        <div class="form-grid">
+          <label>Card
+            <input id="marketplaceCardName" readonly>
+          </label>
+
+          <label>Set
+            <select id="marketplaceSet"></select>
+          </label>
+
+          <label>Rarity
+            <select id="marketplaceRarity"></select>
+          </label>
+
+          <label>Quantity
+            <input id="marketplaceQty" type="number" min="1" value="1">
+          </label>
+
+          <label>Desired price per card
+            <input id="marketplacePrice" type="number" min="0" step="0.01">
+          </label>
+        </div>
+        
+        <div class="modal-actions">
+          <button class="btn" onclick="closeMarketplaceModal()">Cancel</button>
+          <button class="btn primary" onclick="saveMarketplaceListing()">List Card</button>
+        </div>
+      </div>
+      
+    </div>
     </section>
   </main>
 </div>
@@ -268,11 +310,12 @@
 
             <!-- ADD THE BUTTON HERE -->
             <div class="add-to-deck-controls">
+              <label for="detailCardSetSelect">Add from set</label>
+              <select id="detailCardSetSelect"></select>
 
               <label for="detailCardRaritySelect">
                 Rarity
               </label>
-
               <select id="detailCardRaritySelect">
                   <option value="">Select rarity</option>
               </select>
@@ -303,6 +346,8 @@
 
 
 
-<script src="script.js"></script>
+<script src="script.js">
+ 
+</script>
 </body>
 </html>
