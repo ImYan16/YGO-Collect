@@ -1,72 +1,223 @@
- let userCurrency = "PHP";
+let userCurrency = "PHP";
  let localCardDatabase = [];
  let localCardDatabaseReady = false;
  let localCardDatabasePromise = null;
- let banlists = {};
+ let banlists = {
+  TCG: {},
+  AE: {},
+  OCG: {}
+ };
  let activeBanlist = "AE";
  let banlistsLoaded = false;
-function loadLocalCardDatabase() {
 
-    if (localCardDatabasePromise) {
-        return localCardDatabasePromise;
-    }
 
-    localCardDatabasePromise = fetch("./data/cards.json")
-        .then(response => {
+ const LOCAL_CARD_FILES = [
+  "./data/tcg.json",
+  "./data/ae.json",
+  "./data/ocg.json"
+];
 
-            if (!response.ok) {
-                throw new Error(
-                    `cards.json HTTP ${response.status}`
-                );
-            }
+async function loadLocalCardDatabase() {
+  if (localCardDatabasePromise) return localCardDatabasePromise;
 
-            return response.json();
-        })
-        .then(json => {
+  localCardDatabasePromise = Promise.all(
+    LOCAL_CARD_FILES.map(async file => {
+      const response = await fetch(file);
+      if (!response.ok) throw new Error(`${file} HTTP ${response.status}`);
+      return response.json();
+    })
+  ).then(([tcg, ae, ocg]) => {
+  const tcgCards = Array.isArray(tcg.data) ? tcg.data : [];
+  const aeCards = Array.isArray(ae.data) ? ae.data : [];
+  const ocgCards = Array.isArray(ocg.data) ? ocg.data : [];
 
-            if (!Array.isArray(json.data)) {
-                throw new Error(
-                    "cards.json does not contain data[]"
-                );
-            }
+  const cardNameKey = value => String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[’‘`´]/g, "'")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 
-            localCardDatabase = json.data;
-            localCardDatabaseReady = true;
-            /* 
-            console.log(
-                "Asian-English database loaded:",
-                localCardDatabase.length,
-                "cards"
-            ); 
+  const byCardName = sourceCards => {
+    const result = new Map();
 
-            const testCard = localCardDatabase.find(card =>
-                String(card.name || "")
-                    .toLowerCase()
-                    .includes("a case for k9")
-            );
+    sourceCards.forEach(card => {
+      const name = cardNameKey(card.card_name || card.name);
+      if (!name) return;
+      if (!result.has(name)) result.set(name, []);
+      result.get(name).push(card);
+    });
 
-            console.log(
-                "A Case for K9 found:",
-                testCard
-            );*/   
+    return result;
+  };
 
-            return localCardDatabase;
+  const aeByName = byCardName(aeCards);
+  const ocgByName = byCardName(ocgCards);
 
-        })
-        .catch(error => {
+  localCardDatabase = tcgCards
+    .filter(card => card?.id && card?.name)
+    .map(card => {
+      const tcgSets = Array.isArray(card.card_sets)
+        ? card.card_sets
+        : [];
 
-            console.error(
-                "Failed to load cards.json:",
-                error
-            );
+      const cardName = cardNameKey(card.name);
+      const asianEnglishPrintings = aeByName.get(cardName) || [];
+      const ocgPrintings = ocgByName.get(cardName) || [];
 
-            localCardDatabase = [];
-            localCardDatabaseReady = false;
+      return {
+        ...card,
 
-            throw error;
-        });
+        image:
+          card.card_images?.[0]?.image_url_small ||
+          card.card_images?.[0]?.image_url ||
+          "",
 
-    return localCardDatabasePromise;
+        cardText: card.desc || "",
+        cardCode: getPrimaryCardCode(card),
+
+        asian_english_sets: mergePrintings(
+          card.asian_english_sets,
+          asianEnglishPrintings
+        ),
+        ocg_sets: mergePrintings(card.ocg_sets, ocgPrintings),
+        asian_english_printings: asianEnglishPrintings,
+        ocg_printings: ocgPrintings
+      };
+    });
+
+  cardDatabase = localCardDatabase;
+  localCardDatabaseReady = true;
+
+  console.log("Loaded:", {
+    tcg: tcgCards.length,
+    ae: aeCards.length,
+    ocg: ocgCards.length,
+    merged: localCardDatabase.length,
+    cardsWithAe: localCardDatabase.filter(card => card.asian_english_sets.length).length,
+    cardsWithOcg: localCardDatabase.filter(card => card.ocg_sets.length).length
+  });
+
+  return localCardDatabase;
+}).catch(error => {
+  console.error("Error loading local card database:", error);
+  localCardDatabaseReady = false;
+  throw error;
+});
+  return localCardDatabase;
+}
+
+function mergePrintings(existing, additions) {
+  const merged = [
+    ...(Array.isArray(existing) ? existing : []),
+    ...(Array.isArray(additions) ? additions : [])
+  ];
+  const seen = new Set();
+
+  return merged.filter(printing => {
+    const key = [
+      printing.set_name || "",
+      printing.card_code || printing.set_code || "",
+      ...(Array.isArray(printing.rarity) ? printing.rarity : [printing.rarity || ""])
+    ].join("|").toLowerCase();
+
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function getPrimaryCardCode(card) {
+  return (
+    card.asian_english_sets?.[0]?.card_code ||
+    card.ocg_sets?.[0]?.card_code ||
+    card.card_sets?.[0]?.set_code ||
+    ""
+  );
+}
+
+function getSetCode(code) {
+  return String(code || "").trim().toUpperCase().split("-")[0];
+}
+
+function getPrintingRegion(code) {
+  const value = String(code || "").toUpperCase();
+
+  if (/-AE\d+$/.test(value)) return "AE";
+  if (/-OCG\d+$/.test(value)) return "OCG";
+  return "TCG";
+}
+
+function getCardPrintings(card) {
+  const printings = [];
+
+  (card.card_sets || []).forEach(set => {
+    if (!set.set_code) return;
+
+    printings.push({
+      region: "TCG",
+      set: getSetCode(set.set_code),
+      setName: set.set_name || "",
+      code: set.set_code,
+      rarity: set.set_rarity || "",
+      rarityCode: set.set_rarity_code || ""
+    });
+  });
+
+  (card.asian_english_sets || []).forEach(set => {
+    const code = set.card_code || set.set_code;
+    if (!code) return;
+
+    const rarities = Array.isArray(set.rarity)
+      ? (set.rarity.length ? set.rarity : [""])
+      : [set.rarity || ""];
+
+    rarities.forEach(rarity => {
+      printings.push({
+        region: "AE",
+        set: getSetCode(code),
+        setName: set.set_name || "",
+        code,
+        rarity,
+        rarityCode: ""
+      });
+    });
+  });
+
+  (card.ocg_sets || []).forEach(set => {
+    const code = set.card_code || set.set_code;
+    if (!code) return;
+
+    const rarities = Array.isArray(set.rarity)
+      ? (set.rarity.length ? set.rarity : [""])
+      : [set.rarity || ""];
+
+    rarities.forEach(rarity => {
+      printings.push({
+        region: "OCG",
+        set: getSetCode(code),
+        setName: set.set_name || "",
+        code,
+        rarity,
+        rarityCode: ""
+      });
+    });
+  });
+
+  return printings;
+}
+
+function getCardSets(card) {
+  return [...new Set(getCardPrintings(card).map(printing => printing.set))];
+}
+
+function getSetRarities(card, setCode) {
+  return [...new Set(
+    getCardPrintings(card)
+      .filter(printing => printing.set === setCode)
+      .map(printing => printing.rarity)
+      .filter(Boolean)
+  )];
 }
 
 
@@ -141,16 +292,11 @@ function getCurrencySymbol() {
 
 
 function updateCurrencyDisplay() {
-    const currencyElement = document.getElementById("currencySymbol");
+  document.querySelectorAll(".currency-symbol").forEach(element => {
+    element.textContent = getCurrencySymbol();
+  });
 
-    if (currencyElement) {
-        currencyElement.textContent = getCurrencySymbol();
-    }
-
-    // Refresh prices if your page has a price rendering function
-    if (typeof renderCards === "function") {
-        renderCards();
-    }
+  if (typeof renderCards === "function") renderCards();
 }
 
 
@@ -199,7 +345,7 @@ const TCG_FEEDS = [
   }
 ];
 const TCG_GLOBAL_FEED = "https://tcg-corner.com/products.json";
-const YGOPRODECK_API = "data/cards.json";
+
 const TCGC_RAR = {
   C: "C",
   N: "C", 
@@ -236,6 +382,7 @@ const TCGC_RAR = {
   COR: "CR", 
   HR: "HGR", HGR: "HGR"
 };
+
 let cards = [];
 let tcgLoading = false;
 let tcgError = "";
@@ -257,6 +404,7 @@ let deckApiLoading = false;
 let deckApiError = "";
 let deckSearchTimer;
 const deckSearchCache = new Map();
+
 
 function money(n) {
   return formatPrice(n);
@@ -334,8 +482,11 @@ function renderDecks() {
   let missingCards = 0;
   let estimatedCost = 0;
   Object.values(deckCards).flat().forEach(entry => {
-    const card = cards.find(item => String(item.id) === String(entry.cardId));
-    const price = card?.price || entry.price || 0;
+    const card =
+      cards.find(item => String(item.id) === String(entry.cardId)) ||
+      localCardDatabase.find(item => String(item.id) === String(entry.cardId)) ||
+      entry;
+    const price = Number(entry.tcgCornerPrice ?? entry.price ?? 0);
     const missing = Math.max(0, entry.qty - (owned[entry.cardId] || 0));
     deckValue += entry.qty * price;
     missingCards += missing;
@@ -351,7 +502,7 @@ function renderDecks() {
     list.className = "section card empty";
     list.textContent = "No decks yet. The deck builder will use the same card and collection database.";
     profile.style.display = "none";
-    return;
+   
   }
   
 
@@ -439,7 +590,7 @@ function renderDecks() {
 
     const modal = document.createElement("div");
     modal.id = "deleteDeckModal";
-    modal.className = "delete-deck-modal";
+    modal.className = "delete-deck";
 
     modal.innerHTML = `
         <div class="delete-deck-overlay"></div>
@@ -470,7 +621,7 @@ function renderDecks() {
             </div>
         </div>
     `;
-
+    
     document.body.appendChild(modal);
 
     const cancelButton =
@@ -494,10 +645,10 @@ function renderDecks() {
             return;
         }
 
-        // Remove deck from deck list
+        // Remove
         decks.splice(deckIndex, 1);
 
-        // Remove cards belonging to the deck
+        // Remove cards
         delete deckCards[deckName];
 
         // Remove purchases assigned to this deck
@@ -519,11 +670,12 @@ function renderDecks() {
 
         renderDecks();
     });
-}}
+  }
+}
   
 function toggleDeckProfile(deckName) {
     if (activeDeck === deckName) {
-        activeDeck = null;
+        activeDeck = null
     } else {
         activeDeck = deckName;
     }
@@ -683,7 +835,7 @@ function renderDeckProfile() {
             <button class="deck-list-remove" title="Remove one copy" onclick="removeCardFromDeck('${escapeHtml(copyId)}')">×</button>
             <div class="deck-list-tooltip">
               <strong>${escapeHtml(name)}</strong>
-              <small>${escapeHtml(card?.cardCode || "")} · ${escapeHtml(rarity)} · ${money(card?.price || entry.price)}</small>
+              <small>${escapeHtml(card?.cardCode || "")} · ${escapeHtml(rarity)} · ${money(entry.tcgCornerPrice ?? entry.price ?? 0)}</small>
               <div class="deck-list-tooltip-label">Card text</div>
               <p>${escapeHtml(card?.cardText || entry.cardText || "Card text unavailable.")}</p>
             </div>
@@ -755,6 +907,10 @@ function normaliseYgoProCard(card) {
             ? card.asian_english_sets
             : [],
 
+        ocg_sets: Array.isArray(card.ocg_sets)
+          ? card.ocg_sets
+          : [],
+
         card_images: Array.isArray(card.card_images)
             ? card.card_images
             : [],
@@ -801,7 +957,8 @@ async function loadDeckApiCards() {
 
   if (!Array.isArray(cardDatabase) || cardDatabase.length === 0) {
 
-    const response = await fetch("data/cards.json");
+    await loadLocalCardDatabase();
+    cardDatabase = localCardDatabase;
 
     if (!response.ok) {
       throw new Error(
@@ -967,416 +1124,183 @@ function renderDeckCardPicker() {
   setupDeckDropZone();
 }
 
-function getAsianEnglishSets(card) {
 
-    if (!Array.isArray(localCardDatabase)) {
-        return [];
-    }
 
-    const normalizeName = name =>
-        String(name || "")
-            .trim()
-            .replace(/^"+|"+$/g, "")
-            .replace(/\\"/g, '"')
-            .replace(/\s+/g, " ")
-            .toLowerCase();
+async function showCardDetails(card) {
+  const panel = document.getElementById("cardDetailsPanel");
+  if (!panel || !card) return;
 
-    const targetName = normalizeName(card.name);
+  await loadLocalCardDatabase();
 
-    const localCard = localCardDatabase.find(item =>
-        normalizeName(item.name) === targetName
+  const printings = getCardPrintings(card);
+
+  const setElement = document.getElementById("detailCardSet");
+  const setSelect = document.getElementById("detailCardSetSelect");
+  const raritySelect = document.getElementById("detailCardRaritySelect");
+
+  // Show every TCG, AE, and OCG printing.
+  if (setElement) {
+    setElement.innerHTML = printings.length
+      ? printings.map(printing => `
+          <div class="card-set-row">
+            <strong>${escapeHtml(printing.set)}</strong>
+            <span>${escapeHtml(printing.setName || "Unknown set")}</span>
+            <span class="pill">${escapeHtml(printing.region)}</span>
+            <span>${escapeHtml(printing.code)}</span>
+            <span>${escapeHtml(printing.rarity || "Unknown rarity")}</span>
+          </div>
+        `).join("")
+      : "No set information available.";
+  }
+
+  // One option per set and region.
+  const setOptions = [
+    ...new Map(
+      printings.map(printing => [
+        `${printing.region}|${printing.set}`,
+        printing
+      ])
+    ).values()
+  ];
+
+  if (setSelect) {
+    setSelect.innerHTML = setOptions.map(printing => `
+            <option value="${escapeHtml(`${printing.region}|${printing.set}`)}"
+              data-set="${escapeHtml(printing.set)}"
+              data-region="${escapeHtml(printing.region)}">
+        ${escapeHtml(printing.set)}
+        — ${escapeHtml(printing.region)}
+        ${printing.setName ? `— ${escapeHtml(printing.setName)}` : ""}
+      </option>
+    `).join("");
+    const preferredOption = [...setSelect.options].find(option =>
+      option.dataset.region === "AE" || option.dataset.region === "OCG"
+    );
+    if (preferredOption) setSelect.value = preferredOption.value;
+  }
+
+  function updateRarityOptions() {
+    const selectedOption = setSelect?.selectedOptions?.[0];
+    const selectedSet = selectedOption?.dataset.set || "";
+    const selectedRegion = selectedOption?.dataset.region || "TCG";
+
+    const matchingPrintings = printings.filter(printing =>
+      printing.set === selectedSet &&
+      printing.region === selectedRegion
     );
 
-    if (!localCard) {
-    /*    console.log(
-            "No Asian-English data for:",
-            card.name
-        );*/
-
-        return [];
-    }
-    /*
-    console.log(
-        "Asian-English data found:",
-        localCard
-    );*/
-
-    return Array.isArray(localCard.asian_english_sets)
-        ? localCard.asian_english_sets
-        : [];
-}
-
-
-async function showCardDetails(card, deckCardId) {
-    const panel = document.getElementById("cardDetailsPanel");
-
-    if (!panel) return;
-
-    // Make sure local cards.json is loaded
-    await loadLocalCardDatabase();
-
-    // ==========================================
-    // ADD TO DECK BUTTON
-    // ==========================================
-
-    const addButton =
-    document.getElementById("addDetailCardToDeck");
-
-if (addButton) {
-    addButton.onclick = function(event) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        const quantityInput =
-            document.getElementById("detailCardQuantity");
-
-        let quantity = parseInt(
-            quantityInput?.value,
-            10
-        );
-
-        if (!Number.isFinite(quantity) || quantity < 1) {
-            quantity = 1;
-        }
-
-        if (quantity > 3) {
-            quantity = 3;
-        }
-
-        const raritySelect =
-            document.getElementById("detailCardRaritySelect");
-
-        const selectedOption =
-            raritySelect?.selectedOptions?.[0];
-
-        const asianEnglishRarity =
-            selectedOption?.value || "";
-
-        const tcgCornerRarity =
-            selectedOption?.dataset?.tcgRarity || "";
-
-
-        const currentCount =
-            getCardCountInDeck(
-                activeDeck,
-                card.id
-            );
-
-        const cardLimit =
-            getCardLimit(card.name);
-
-        console.log(
-            "ADD CHECK:",
-            card.name,
-            "Current:",
-            currentCount,
-            "Selected:",
-            quantity,
-            "Limit:",
-            cardLimit,
-            "Banlist:",
-            activeBanlist
-        );
-
-        // FORBIDDEN
-        if (cardLimit === 0) {
-            showBanlistPopup(
-            "Deck Limit",
-            `${card.name} has reached its ${cardLimit}-copy limit.`
-            );
-            return false;
-        }
-
-        // SELECTED QUANTITY EXCEEDS BANLIST
-        if (currentCount + quantity > cardLimit) {
-            const remaining =
-                Math.max(0, cardLimit - currentCount);
-
-            if (remaining === 0) {
-                showBanlistPopup(
-                "Deck Limit",
-                `${card.name} has reached its ${cardLimit}-copy limit.`
-                );
-    
-            } else {
-                showBanlistPopup(
-                    "Deck Limit Exceeded",
-                    `${card.name} is limited to ${cardLimit} copy/copies.\n\n` +
-                    `Already in deck: ${currentCount}\n` +
-                    `You selected: ${qty}\n` +
-                    `You can add: ${remaining}`
-                );
-            }
-
-            return;
-        }
-
-        const added = addCardToDeck(
-            deckCardId,
-            quantity,
-            asianEnglishRarity,
-            tcgCornerRarity
-        );
-
-        if (added !== true) {
-            return;
-        }
-
-        panel.hidden = true;
-    };
-}
-
-    // ==========================================
-    // BASIC CARD INFORMATION
-    // ==========================================
-
-    document.getElementById("detailCardName").textContent =
-        card.name || "N/A";
-
-    document.getElementById("detailCardType").textContent =
-        card.type || "N/A";
-
-    document.getElementById("detailCardAtk").textContent =
-        card.atk ?? "N/A";
-
-    document.getElementById("detailCardDef").textContent =
-        card.def ?? "N/A";
-
-    document.getElementById("detailCardLevel").textContent =
-        card.level ?? "N/A";
-
-    document.getElementById("detailCardAttribute").textContent =
-        card.attribute || "N/A";
-
-    document.getElementById("detailCardDescription").textContent =
-        card.desc || "N/A";
-
-    // ==========================================
-    // CARD IMAGE
-    // ==========================================
-
-    const image =
-        document.getElementById("detailCardImage");
-
-    if (card.card_images?.length) {
-
-        image.src =
-            card.card_images[0].image_url;
-
-        image.alt =
-            card.name || "";
-
-    } else if (card.image) {
-
-        image.src =
-            card.image;
-
-        image.alt =
-            card.name || "";
-
-    } else {
-
-        image.removeAttribute("src");
-        image.alt = "No image";
-    }
-
-    // ==========================================
-    // CARD SET INFORMATION
-    // ==========================================
-
-    const cardSetElement =
-        document.getElementById("detailCardSet");
-
-    const rarityElement =
-        document.getElementById("detailCardRarity");
-
-    // Get Asian-English data
-    const asianSets =
-        Array.isArray(card.asian_english_sets)
-            ? card.asian_english_sets
-            : [];
-    const raritySelect =
-    document.getElementById("detailCardRaritySelect");
+    const rarities = [...new Set(
+      matchingPrintings.map(printing => printing.rarity || "")
+    )];
 
     if (raritySelect) {
+      raritySelect.innerHTML = rarities.length
+        ? rarities.map(rarity => `
+            <option value="${escapeHtml(rarity)}"
+                    data-tcg-rarity="${escapeHtml(
+                      TCGC_RAR[rarity] || rarity
+                    )}">
+              ${escapeHtml(getTcgCornerRarity(rarity) || "Unknown rarity")}
+            </option>`
+        ).join("")
+        : `<option value="">No rarity available</option>`;
+    }
+  }
 
-      raritySelect.innerHTML = "";
+  setSelect?.addEventListener("change", updateRarityOptions);
+  updateRarityOptions();
 
-      const rarities = [
-        ...new Set(
-            asianSets.flatMap(set =>
-                Array.isArray(set.rarity)
-                    ? set.rarity
-                    : set.rarity
-                        ? [set.rarity]
-                        : []
-            )
-        )
-      ];
+  document.getElementById("detailCardName").textContent =
+    card.name || "N/A";
 
-    if (rarities.length) {
+  document.getElementById("detailCardType").textContent =
+    card.type || "N/A";
 
-        rarities.forEach(rarity => {
+  document.getElementById("detailCardAtk").textContent =
+    card.atk ?? "N/A";
 
-            const option =
-                document.createElement("option");
+  document.getElementById("detailCardDef").textContent =
+    card.def ?? "N/A";
 
-            option.value = rarity;
-            option.textContent = rarity;
+  document.getElementById("detailCardLevel").textContent =
+    card.level ?? "N/A";
 
-            option.dataset.tcgRarity =
-                TCGC_RAR[rarity] || rarity;
+  document.getElementById("detailCardAttribute").textContent =
+    card.attribute || "N/A";
 
-            raritySelect.appendChild(option);
-        });
+  document.getElementById("detailCardRarity").textContent =
+    [...new Set(printings.map(item => item.rarity).filter(Boolean))]
+      .join(", ") || "N/A";
 
-        raritySelect.selectedIndex = 0;
+  document.getElementById("detailCardDescription").textContent =
+    card.desc || card.cardText || "N/A";
 
-    } else {
+  const image = document.getElementById("detailCardImage");
+  const imageUrl =
+    card.card_images?.[0]?.image_url || card.image || "";
 
-        const option =
-            document.createElement("option");
+  if (imageUrl) {
+    image.src = imageUrl;
+    image.alt = card.name || "";
+  } else {
+    image.removeAttribute("src");
+    image.alt = "No image";
+  }
 
-        option.value = "";
-        option.textContent = "No rarity data";
+  const addButton = document.getElementById("addDetailCardToDeck");
 
-        raritySelect.appendChild(option);
+  if (addButton) {
+    addButton.onclick = event => {
+      event.preventDefault();
+
+      if (!activeDeck) {
+        alert("Select or create a deck first.");
+        return;
       }
-  } /*
-    console.log(
-        "Card:",
-        card.name
-    );
 
-    console.log(
-        "Asian-English sets:",
-        asianSets
-    ); */
+      const selectedOption = setSelect?.selectedOptions?.[0];
+      const selectedSet = selectedOption?.dataset.set || "";
+      const selectedRegion = selectedOption?.dataset.region || "TCG";
+      const selectedRarity = raritySelect?.value || "";
 
-    // ==========================================
-    // ASIAN-ENGLISH DATA EXISTS
-    // ==========================================
+      const quantity = Math.min(
+        3,
+        Math.max(
+          1,
+          Number(document.getElementById("detailCardQuantity")?.value) || 1
+        )
+      );
 
-    if (asianSets.length > 0) {
-        /*
-        console.log(
-            "Using Asian-English data for:",
-            card.name
-        ); */
+      const printing = printings.find(item =>
+        item.set === selectedSet &&
+        item.region === selectedRegion &&
+        item.rarity === selectedRarity
+      );
 
-        // Set name + Asian-English card code
-        cardSetElement.innerHTML =
-            asianSets
-                .map(set => {
+      if (!printing) {
+        alert("Select a valid set and rarity.");
+        return;
+      }
 
-                    const setName =
-                        escapeHtml(
-                            set.set_name || "N/A"
-                        );
+      const added = addCardEntryToDeck(
+        activeDeck,
+        card,
+        quantity,
+        selectedRarity,
+        getTcgCornerRarity(selectedRarity),
+        selectedSet,
+        selectedRegion
+      );
 
-                    const cardCode =
-                        set.card_code
-                            ? ` (${escapeHtml(set.card_code)})`
-                            : "";
+      if (added === true) {
+        saveData();
+        panel.hidden = true;
+        renderDecks();
+      }
+    };
+  }
 
-                    return `
-                        <div>
-                            ${setName}${cardCode}
-                        </div>
-                    `;
-                })
-                .join("");
-
-        // Asian-English rarity
-        const asianRarities = [
-            ...new Set(
-                asianSets.flatMap(set => {
-
-                    if (Array.isArray(set.rarity)) {
-                        return set.rarity;
-                    }
-
-                    if (set.rarity) {
-                        return [set.rarity];
-                    }
-
-                    return [];
-                })
-            )
-        ];
-
-        rarityElement.textContent =
-            asianRarities.join(", ") || "N/A";
-
-    }
-
-    // ==========================================
-    // NO ASIAN-ENGLISH DATA
-    // FALL BACK TO YGOPRODECK
-    // ==========================================
-
-    else {
-        /*
-        console.log(
-            "No Asian-English printing.",
-            "Using YGOPRODeck data for:",
-            card.name
-        ); */
-
-        const sets =
-            Array.isArray(card.card_sets)
-                ? card.card_sets
-                : [];
-
-        // YGOPRODeck set name + set code
-        if (sets.length > 0) {
-
-            cardSetElement.innerHTML =
-                sets
-                    .map(set => {
-
-                        const setName =
-                            escapeHtml(
-                                set.set_name || "N/A"
-                            );
-
-                        const setCode =
-                            set.set_code
-                                ? ` (${escapeHtml(set.set_code)})`
-                                : "";
-
-                        return `
-                            <div>
-                                ${setName}${setCode}
-                            </div>
-                        `;
-                    })
-                    .join("");
-
-        } else {
-
-            cardSetElement.textContent =
-                "N/A";
-        }
-
-        // YGOPRODeck rarity
-        const ygoProRarities = [
-            ...new Set(
-                sets
-                    .map(set => set.set_rarity)
-                    .filter(Boolean)
-            )
-        ];
-
-        rarityElement.textContent =
-            ygoProRarities.join(", ") || "N/A";
-    }
-
-    // ==========================================
-    // SHOW PANEL
-    // ==========================================
-
-    panel.hidden = false;
+  panel.hidden = false;
 }
 
 
@@ -1636,12 +1560,17 @@ function addCardToDeck(
     return false;
   }
 
+  const selectedSet = "";
+  const selectedRegion = "";
+
   const added = addCardEntryToDeck(
     activeDeck,
     card,
     qty,
     asianEnglishRarity,
-    tcgCornerRarity
+    tcgCornerRarity,
+    selectedSet,
+    selectedRegion
   );
 
   if (added !== true) {
@@ -1673,166 +1602,177 @@ function getCardCountInDeck(deckName, cardId) {
 
 
 function getCardLimit(cardName) {
+  const requested = String(activeBanlist || "TCG")
+    .trim()
+    .toUpperCase();
 
-  if (!banlistsLoaded) {
-    console.error("Banlists have not loaded yet.");
-    return 3;
-  }
+  const aliases = {
+    TCG: ["TCG", "EN", "ENGLISH"],
+    AE: ["AE", "ASIAN_ENGLISH", "ASIAN ENGLISH", "ASIAN-ENGLISH"],
+    OCG: ["OCG", "JP", "JAPANESE"]
+  };
 
-  const banlist = banlists[activeBanlist];
+  const possibleKeys = aliases[requested] || [requested];
+
+  const banlist = possibleKeys
+    .map(key => banlists?.[key])
+    .find(value => value && typeof value === "object");
 
   if (!banlist) {
-    console.error(
+    console.warn(
       "Banlist not found:",
-      activeBanlist,
+      requested,
       "Available:",
-      Object.keys(banlists)
+      Object.keys(banlists || {})
     );
 
     return 3;
   }
 
-  const name = String(cardName || "")
-    .trim()
-    .toLowerCase();
+  const entry = banlist[String(cardName || "").trim().toLowerCase()];
 
-  const forbidden = (banlist.Forbidden || []).map(card =>
-    String(card).trim().toLowerCase()
-  );
+  if (entry === undefined || entry === null) return 3;
 
-  const limited = (banlist.Limited || []).map(card =>
-    String(card).trim().toLowerCase()
-  );
+  if (typeof entry === "number") return entry;
 
-  const semiLimited = (banlist["Semi-Limited"] || []).map(card =>
-    String(card).trim().toLowerCase()
-  );
-
-  if (forbidden.includes(name)) {
-    return 0;
-  }
-
-  if (limited.includes(name)) {
-    return 1;
-  }
-
-  if (semiLimited.includes(name)) {
-    return 2;
-  }
-
-  return 3;
+  return Number(entry.limit ?? entry.status ?? 3);
 }
 
 function addCardEntryToDeck(
   deckName,
   card,
   qty,
-  asianEnglishRarity,
-  tcgCornerRarity
+  asianEnglishRarity = "",
+  tcgCornerRarity = "",
+  selectedSet = "",
+  selectedRegion = ""
 ) {
-  const entries =
-    deckCards[deckName] ||
-    (deckCards[deckName] = []);
-
   qty = Number(qty) || 1;
 
   const cardId = card.ygoProId || card.id;
 
-  const currentCount = getCardCountInDeck(
-    deckName,
-    cardId
-  );
+  const localCard =
+    localCardDatabase.find(item =>
+      String(item.id) === String(cardId) ||
+      String(item.ygoProId) === String(cardId)
+    ) || localCardDatabase.find(item =>
+      String(item.name || "").trim().toLowerCase() ===
+      String(card.name || "").trim().toLowerCase()
+    ) || card;
 
-  const cardLimit = getCardLimit(card.name);
+  const selectedRarity =
+    asianEnglishRarity || tcgCornerRarity || "";
 
-  console.log(
-    "BANLIST:",
-    card.name,
-    "Current:",
-    currentCount,
-    "Requested:",
-    qty,
-    "Limit:",
-    cardLimit
-  );
+  const printings = getCardPrintings(localCard);
 
-  // FORBIDDEN
+  if (!printings.length && card.cardCode) {
+    printings.push({
+      region: getPrintingRegion(card.cardCode),
+      set: getSetCode(card.cardCode),
+      setName: "TCG Corner purchase",
+      code: card.cardCode,
+      rarity: card.rarity || "",
+      rarityCode: ""
+    });
+  }
+
+  const purchaseRegion = selectedRegion || getPrintingRegion(card.cardCode);
+  const purchaseSet = selectedSet || getSetCode(card.cardCode);
+  const printing =
+    printings.find(item =>
+      item.region === purchaseRegion &&
+      item.set === purchaseSet &&
+      (!selectedRarity || item.rarity === selectedRarity)
+    ) || printings.find(item =>
+      (!selectedSet || item.set === selectedSet) &&
+      (!selectedRegion || item.region === selectedRegion) &&
+      (!selectedRarity || item.rarity === selectedRarity)
+    ) || printings.find(item =>
+      item.region === purchaseRegion
+    ) || printings[0];
+
+  if (!printing) {
+    console.error("Printing not found", {
+      card: localCard.name,
+      selectedSet,
+      selectedRegion,
+      selectedRarity
+    });
+    return false;
+  }
+
+  const entries = deckCards[deckName] ||
+    (deckCards[deckName] = []);
+
+  const currentCount = getCardCountInDeck(deckName, cardId);
+  const cardLimit = getCardLimit(localCard.name);
+
   if (cardLimit === 0) {
     showBanlistPopup(
       "Card Forbidden",
-      `${card.name} is forbidden on the selected banlist and cannot be added to the deck.`
+      `${localCard.name} is forbidden on the selected banlist.`
+    );
+    return false;
+  }
+
+  if (currentCount + qty > cardLimit) {
+    const remaining = Math.max(0, cardLimit - currentCount);
+
+    showBanlistPopup(
+      "Deck Limit Exceeded",
+      `${localCard.name} is limited to ${cardLimit} copy/copies.\n\n` +
+      `Already in deck: ${currentCount}\n` +
+      `You selected: ${qty}\n` +
+      `You can add: ${remaining}`
     );
 
     return false;
   }
 
-  // SELECTED QUANTITY EXCEEDS BANLIST LIMIT
-  if (currentCount + qty > cardLimit) {
-    const remaining =
-      Math.max(0, cardLimit - currentCount);
-
-    if (remaining === 0) {
-      showBanlistPopup(
-        "Deck Limit",
-        `${card.name} has reached its ${cardLimit}-copy limit.`
-      );
-    } else {
-      showBanlistPopup(
-        "Deck Limit Exceeded",
-        `${card.name} is limited to ${cardLimit} copy/copies.\n\n` +
-        `Already in deck: ${currentCount}\n` +
-        `You selected: ${qty}\n` +
-        `You can add: ${remaining}`
-      );
-    }
-
-    return false;
-  }
-
-  // ONLY ADD AFTER ALL CHECKS PASS
-
-  const existing = entries.find(
-    entry =>
-      String(entry.cardId) === String(cardId) &&
-      String(entry.rarity || "") ===
-        String(tcgCornerRarity || "")
+  const existing = entries.find(entry =>
+    String(entry.cardId) === String(cardId) &&
+    String(entry.setCode || "") === String(printing.code || "") &&
+    String(entry.rarity || "") === String(printing.rarity || "")
   );
 
-  const entry =
-    existing ||
-    {
-      cardId: cardId,
-      card: card.name,
-      rarity: tcgCornerRarity || "",
-      price: card.price,
-      cardText: card.cardText,
-      image: card.image,
-      cardCode: card.cardCode,
-      qty: 0,
-      copyIds: []
-    };
+  const entry = existing || {
+    cardId,
+    card: localCard.name,
+    set: printing.set,
+    setCode: printing.code,
+    region: printing.region,
+    rarity: printing.rarity,
+    price: getDeckCardPrice(
+      localCard,
+      selectedRarity,
+      printing.set,
+      printing.region
+    ),
+    tcgCornerPrice: null,
+    cardText: localCard.cardText || localCard.desc || "",
+    image: localCard.image ||
+      localCard.card_images?.[0]?.image_url || localCard.image|| "",
+    cardCode: printing.code,
+    qty: 0,
+    copyIds: []
+  };
 
-  if (!existing) {
-    entries.push(entry);
-  }
+  if (!existing) entries.push(entry);
 
   ensureEntryCopyIds(entry);
 
   for (let index = 0; index < qty; index++) {
-    entry.copyIds.push(
-      createDeckCopyId()
-    );
+    const copyId = createDeckCopyId();
+    entry.copyIds.push(copyId);
+
+    if (!deckCardOrder[deckName]) {
+      deckCardOrder[deckName] = [];
+    }
+
+    deckCardOrder[deckName].push(copyId);
   }
 
   entry.qty = entry.copyIds.length;
-
-  const order =
-    deckCardOrder[deckName] ||
-    (deckCardOrder[deckName] = []);
-
-  order.push(
-    ...entry.copyIds.slice(-qty)
-  );
 
   return true;
 }
@@ -2034,7 +1974,7 @@ function collectionRows() {
     const destination = p.destination || "Binder Collection";
     const key = p.cardId + "|" + p.printing + "|" + destination;
     if(!map[key]) map[key] = {cardId:p.cardId,card:p.card,printing:p.printing,destination,qty:0,paid:0};
-    map[key].qty += p.qty;
+    map[key].qty += Number(p.qty || 0);
     map[key].paid += p.total;
   });
   return Object.values(map);
@@ -2047,7 +1987,7 @@ function renderDashboard() {
   document.getElementById("dashValue").textContent = money(value);
   document.getElementById("dashSpent").textContent = money(spent);
   document.getElementById("dashGain").textContent = money(value-spent);
-  document.getElementById("dashCards").textContent = rows.reduce((s,r)=>s+r.qty,0);
+  document.getElementById("dashCards").textContent = rows.reduce((s,r)=>s + Number(r.qty || 0), 0);
   const now = new Date();
   const month = purchases.filter(p => {
     const d = new Date(p.date);
@@ -2058,7 +1998,7 @@ function renderDashboard() {
   document.getElementById("recentPurchases").innerHTML = purchases.slice(0,5).map(p =>
     (() => {
       const marketPrice = cards.find(card => String(card.id) === String(p.cardId))?.price || 0;
-      const gain = marketPrice * p.qty - p.total;
+      const gain = marketPrice * Number(p.qty || 0) - p.total;
       return `<tr><td>${p.date}</td><td>${p.card}</td><td>${p.qty}</td><td>${money(p.price)}</td><td>${money(marketPrice)}</td><td>${money(p.total)}</td><td class="${gain >= 0 ? "green" : "red"}">${gain >= 0 ? "+" : ""}${money(gain)}</td></tr>`;
     })()
   ).join("") || `<tr><td colspan="7" class="empty">No purchases yet.</td></tr>`;
@@ -2118,6 +2058,7 @@ function renderCollection() {
                 <img
                   src="${escapeHtml(card.image)}"
                   alt="${escapeHtml(r.card)}"
+                  ${cardTooltipAttributes(card, card.rarity)}
                 >
               `
               : `
@@ -2250,7 +2191,10 @@ function updateSpendingPurchase(select) {
 function renderSpending() {
   const total = purchases.reduce((s,p)=>s+p.total,0);
   const now = new Date();
-  const month = purchases.filter(p => {const d=new Date(p.date);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();}).reduce((s,p)=>s+p.total,0);
+  const month = purchases.filter(p => {
+    const d = new Date(p.date);
+    return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
+  }).reduce((s,p)=>s+p.total,0);
   document.getElementById("spentTotal").textContent = money(total);
   document.getElementById("spentMonth").textContent = money(month);
   document.getElementById("purchaseCount").textContent = purchases.length;
@@ -2258,8 +2202,8 @@ function renderSpending() {
   document.getElementById("purchaseTable").innerHTML = purchases.map(p =>
     (() => {
       const marketPrice = cards.find(card => String(card.id) === String(p.cardId))?.price || 0;
-      const gain = marketPrice * p.qty - p.total;
-      return `<tr><td>${p.date}</td><td><strong>${p.card}</strong></td><td>${p.printing}</td><td>${p.destination || "Binder Collection"}</td><td>${p.qty}</td><td>${money(p.price)}</td><td>${money(marketPrice)}</td><td>${money(p.total)}</td><td class="${gain >= 0 ? "green" : "red"}">${gain >= 0 ? "+" : ""}${money(gain)}</td><td>${p.seller}</td><td><button class="btn" onclick="deletePurchase('${escapeHtml(p.id)}')">Delete</button></td></tr>`;
+      const gain = marketPrice * Number(p.qty || 0) - p.total;
+      return `<tr><td>${p.date}</td><td>${p.card}</td><td>${p.qty}</td><td>${money(p.price)}</td><td>${money(marketPrice)}</td><td>${money(p.total)}</td><td class="${gain >= 0 ? "green" : "red"}">${gain >= 0 ? "+" : ""}${money(gain)}</td><td>${p.seller}</td><td><button class="btn" onclick="deletePurchase('${escapeHtml(p.id)}')">Delete</button></td></tr>`;
     })()
   ).join("") || `<tr><td colspan="11" class="empty">No purchases recorded.</td></tr>`;
 }
@@ -2370,14 +2314,25 @@ function renderCards() {
     const rarityOptions = [...new Map(variants.map(variant => [variant.rarity, variant])).values()];
     return `<div class="card card-item">
       <div class="card-image">
-      ${card.image ? `<img src="${escapeHtml(card.image)}" alt="${escapeHtml(card.name)}" style="width:100%;height:100%;object-fit:contain;">` : "No image"}
+      ${
+          card.image
+            ? `
+                <img
+                  src="${escapeHtml(card.image)}"
+                  alt="${escapeHtml(card.name)}"
+                  ${cardTooltipAttributes(card, card.rarity)}
+                  style="width:100%;height:100%;object-fit:contain;"
+                >
+              `
+            : "No image"
+        }
       </div>
       <div class="card-info">
         <strong>${escapeHtml(card.name)}</strong>
         <small>${escapeHtml(card.cardCode)}</small>
         <label class="label" style="margin-top:8px;">Rarity
           <select onchange="updateCardRarity(this)">
-            ${rarityOptions.map(variant => `<option value="${escapeHtml(variant.id)}">${escapeHtml(variant.rarity)}</option>`).join("")}
+            ${rarityOptions.map(variant => `<option value="${escapeHtml(variant.id)}">${escapeHtml(variant.rarity)} · ${money(variant.price)}</option>`).join("")}
           </select>
         </label>
         <div style="margin-top:8px;" class="gold card-price">${money(card.price)}</div>
@@ -2392,15 +2347,22 @@ function renderCards() {
 }
 
 function updateCardRarity(select) {
-  const card = cards.find(item => String(item.id) === String(select.value));
+  const card = cards.find(
+    item => String(item.id) === String(select.value)
+  );
+
   if (!card) return;
 
   const cardItem = select.closest(".card-item");
+
   cardItem.querySelector(".card-price").textContent = money(card.price);
-  cardItem.querySelector(".card-stock").textContent = `${card.available ? "In stock" : "Out of stock"} · TCG Corner`;
-  cardItem.querySelector(".card-purchase").dataset.cardId = card.id;
-  const view = cardItem.querySelector(".card-view");
-  if (view && card.url) view.href = card.url;
+  cardItem.querySelector(".card-stock").textContent =
+    `${card.available ? "In stock" : "Out of stock"} · TCG Corner`;
+
+  const purchaseButton = cardItem.querySelector(".card-purchase");
+  purchaseButton.dataset.cardId = card.id;
+  purchaseButton.dataset.price = card.price;
+  purchaseButton.dataset.rarity = card.rarity || select.options[select.selectedIndex].text;
 }
 
 function openPurchaseFor(id) {
@@ -2537,52 +2499,100 @@ function populatePurchaseSelector() {
   ).join("");
 }
 
+function getDeckCardPrice(card, rarity = "", setCode = "", region = "") {
+  const wantedRarity = getTcgCornerRarity(rarity).toLowerCase();
+
+  const matchesCard = item =>
+    String(item.cardCode || "").toLowerCase() ===
+      String(card.cardCode || "").toLowerCase() ||
+    item.name === card.name;
+
+  const variant = cards.find(item =>
+    matchesCard(item) &&
+    String(item.rarity || "").toLowerCase() === wantedRarity
+  );
+
+  return Number(variant?.price || 0);
+}
+
 
 async function loadBanlists() {
   try {
     const response = await fetch("./data/banlists.json");
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new Error(`Banlist HTTP ${response.status}`);
     }
 
-    banlists = await response.json();
+    const data = await response.json();
 
+    banlists = {
+      TCG: normalizeBanlistSection(data.TCG),
+      AE: normalizeBanlistSection(data.AE),
+      OCG: normalizeBanlistSection(data.OCG)
+    };
 
-    /* 
-    console.log("Banlists loaded:", banlists);
-    console.log("Available banlists:", Object.keys(banlists));
-    */
-
-    const banlistSelect = document.getElementById("banlistSelect");
-
-    if (banlistSelect) {
-      /*
-       * Make sure the selected value exists
-       * in the loaded banlists.
-       */
-      if (banlists[banlistSelect.value]) {
-        activeBanlist = banlistSelect.value;
-      } else {
-        /*
-         * Fall back to the first available banlist.
-         */
-        const firstBanlist = Object.keys(banlists)[0];
-
-        if (firstBanlist) {
-          activeBanlist = firstBanlist;
-          banlistSelect.value = firstBanlist;
-        }
-      }
-
-      console.log("Active banlist:", activeBanlist);
-    }
-
-    banlistsLoaded = true;
-
+    console.log("Loaded banlists:", {
+      TCG: Object.keys(banlists.TCG).length,
+      AE: Object.keys(banlists.AE).length,
+      OCG: Object.keys(banlists.OCG).length
+    });
   } catch (error) {
-    /* console.error("Failed to load banlists:", error); */
-    banlistsLoaded = false;
+    console.error("Banlist loading failed:", error);
+    banlists = { TCG: {}, AE: {}, OCG: {} };
+  }
+}
+
+function normalizeBanlistSection(section) {
+  const result = {};
+
+  for (const name of section?.Forbidden || []) {
+    result[String(name).trim().toLowerCase()] = 0;
+  }
+
+  for (const name of section?.Limited || []) {
+    result[String(name).trim().toLowerCase()] = 1;
+  }
+
+  for (const name of section?.["Semi-Limited"] || []) {
+    result[String(name).trim().toLowerCase()] = 2;
+  }
+
+  return result;
+}
+
+function normalizeBanlists(data) {
+  return {
+    TCG: normalizeBanlistSection(data.TCG),
+    AE: normalizeBanlistSection(data.AE),
+    OCG: normalizeBanlistSection(data.OCG)
+  };
+}
+
+async function loadBanlists() {
+  try {
+    const response = await fetch("./data/banlists.json");
+
+    if (!response.ok) {
+      throw new Error(`Banlist HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    banlists = {
+      TCG: normalizeBanlistSection(data.TCG),
+      AE: normalizeBanlistSection(data.AE),
+      OCG: normalizeBanlistSection(data.OCG)
+    };
+
+    console.log("Loaded banlists:", {
+      TCG: Object.keys(banlists.TCG).length,
+      AE: Object.keys(banlists.AE).length,
+      OCG: Object.keys(banlists.OCG).length
+    });
+  } catch (error) {
+    console.error("Banlist loading failed:", error);
+    banlists = { TCG: {}, AE: {}, OCG: {} };
   }
 }
 
@@ -2615,23 +2625,26 @@ function setActiveBanlist(value) {
 
 
 function getCardLimit(cardName) {
-  /*
-   * Always read the current select value first.
-   * This prevents activeBanlist from becoming stale
-   * when the user changes the banlist.
-   */
-  const banlistSelect = document.getElementById("banlistSelect");
+  const requested = String(activeBanlist || "TCG")
+    .trim()
+    .toUpperCase();
 
-  if (banlistSelect && banlistSelect.value) {
-    activeBanlist = banlistSelect.value;
-  }
+  const aliases = {
+    TCG: ["TCG", "EN", "ENGLISH"],
+    AE: ["AE", "ASIAN_ENGLISH", "ASIAN ENGLISH", "ASIAN-ENGLISH"],
+    OCG: ["OCG", "JP", "JAPANESE"]
+  };
 
-  const banlist = banlists[activeBanlist];
+  const possibleKeys = aliases[requested] || [requested];
+
+  const banlist = possibleKeys
+    .map(key => banlists?.[key])
+    .find(value => value && typeof value === "object");
 
   if (!banlist) {
-    console.error(
+    console.warn(
       "Banlist not found:",
-      activeBanlist,
+      requested,
       "Available:",
       Object.keys(banlists || {})
     );
@@ -2639,41 +2652,13 @@ function getCardLimit(cardName) {
     return 3;
   }
 
-  const name = String(cardName || "")
-    .trim()
-    .toLowerCase();
+  const entry = banlist[String(cardName || "").trim().toLowerCase()];
 
-  const forbidden = (banlist.Forbidden || []).map(card =>
-    String(card)
-      .trim()
-      .toLowerCase()
-  );
+  if (entry === undefined || entry === null) return 3;
 
-  const limited = (banlist.Limited || []).map(card =>
-    String(card)
-      .trim()
-      .toLowerCase()
-  );
+  if (typeof entry === "number") return entry;
 
-  const semiLimited = (banlist["Semi-Limited"] || []).map(card =>
-    String(card)
-      .trim()
-      .toLowerCase()
-  );
-
-  if (forbidden.includes(name)) {
-    return 0;
-  }
-
-  if (limited.includes(name)) {
-    return 1;
-  }
-
-  if (semiLimited.includes(name)) {
-    return 2;
-  }
-
-  return 3;
+  return Number(entry.limit ?? entry.status ?? 3);
 }
 
 
@@ -2704,6 +2689,23 @@ function closeBanlistPopup() {
 }
 
 
+function normalizeBanlists(data) {
+  return {
+    TCG: normalizeBanlistSection(
+      data.TCG || data.tcg || data.EN || data.English
+    ),
+    AE: normalizeBanlistSection(
+      data.AE ||
+      data.ae ||
+      data["Asian English"] ||
+      data["Asian-English"]
+    ),
+    OCG: normalizeBanlistSection(
+      data.OCG || data.ocg || data.JP || data.Japanese
+    )
+  };
+}
+
 document.addEventListener("DOMContentLoaded", function () {
 
   const banlistSelect = document.getElementById("banlistSelect");
@@ -2722,16 +2724,8 @@ document.addEventListener("DOMContentLoaded", function () {
        * If a deck is currently open, re-check its cards
        * against the newly selected banlist.
        */
-      if (typeof activeDeckName !== "undefined" && activeDeckName) {
-
-        if (typeof renderDeck === "function") {
-          renderDeck();
-        }
-
-        if (typeof updateDeckStats === "function") {
-          updateDeckStats();
-        }
-      }
+      renderDecks();
+      renderCollection();
 
     });
   }
@@ -2770,26 +2764,570 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 document.addEventListener("DOMContentLoaded", () => {
-    loadLocalCardDatabase();
-});
-
-document.addEventListener("DOMContentLoaded", () => {
   const banlistSelect = document.getElementById("banlistSelect");
 
   if (banlistSelect) {
     banlistSelect.addEventListener("change", function () {
-      activeBanlist = this.value;
-
-      console.log("Active banlist:", activeBanlist);
+      if (setActiveBanlist(this.value)) {
+        renderDecks();
+        renderCollection();
+      }
     });
+  }
+});
+
+function cardTooltipAttributes(card, rarity = "") {
+  return `
+    data-tooltip-name="${escapeHtml(card?.name || "")}"
+    data-tooltip-code="${escapeHtml(card?.cardCode || "")}"
+    data-tooltip-rarity="${escapeHtml(rarity || card?.rarity || "")}"
+    data-tooltip-price="${escapeHtml(String(card?.price || 0))}"
+    data-tooltip-text="${escapeHtml( "<strong>Card Text:</strong>"+ (card?.cardText || card?.desc || "Card text unavailable.") )}"
+  `;
+}
+
+let activeCardTooltip = null;
+
+document.addEventListener("mouseover", event => {
+  const image = event.target.closest("img[data-tooltip-name]");
+  if (!image) return;
+
+  activeCardTooltip?.remove();
+
+  const tooltip = document.createElement("div");
+  tooltip.className = "card-hover-tooltip";
+  tooltip.innerHTML = `
+    <strong>${image.dataset.tooltipName}</strong>
+    <small>
+      ${image.dataset.tooltipCode}
+      · ${image.dataset.tooltipRarity}
+      · ${formatPrice(image.dataset.tooltipPrice)}
+    </small>
+    <p>${image.dataset.tooltipText}</p>
+  `;
+
+  document.body.appendChild(tooltip);
+  activeCardTooltip = tooltip;
+
+  const rect = image.getBoundingClientRect();
+  tooltip.style.left = `${Math.min(rect.right + 10, window.innerWidth - tooltip.offsetWidth - 10)}px`;
+  tooltip.style.top = `${Math.max(10, rect.top)}px`;
+});
+
+document.addEventListener("mouseout", event => {
+  const image = event.target.closest("img[data-tooltip-name]");
+  if (image && !image.contains(event.relatedTarget)) {
+    activeCardTooltip?.remove();
+    activeCardTooltip = null;
   }
 });
 
 
 
-renderDashboard();
-renderCollection();
-renderSpending();
-renderDecks();
-renderCards();
-loadBanlists();
+let marketplaceListings = JSON.parse(
+  localStorage.getItem("ygoMarketplaceListings") || "[]"
+);
+
+
+
+function addMarketplaceListing(card, quantity, price, set, rarity) {
+  if (!card?.id) return;
+
+  marketplaceListings.push({
+    id: crypto.randomUUID(),
+    cardId: String(card.id),
+    quantity: Number(quantity) || 1,
+    price: Number(price) || 0,
+    set: set || "Unknown set",
+    rarity: rarity || "Unknown rarity"
+  });
+
+  saveMarketplaceListings();
+  renderMarketplaceListings();
+}
+
+function renderMarketplaceListings() {
+  const container = document.getElementById("marketplaceListings");
+  if (!container) return;
+  container.innerHTML = marketplaceListings.map(listing => {
+    const card = localCardDatabase.find(
+      item => String(item.id) === String(listing.cardId)
+    );
+
+    if (!card) return "";
+    
+    const image = card.card_images?.[0]?.image_url_small || card.image || "";
+    const quantity = Number(listing.quantity ?? listing.qty ?? 1);
+    const price = Number(listing.price || 0);
+
+    return `
+      <article class="card marketplace-listing">
+        <img src="${escapeHtml(image)}"
+             alt="${escapeHtml(card.name)}" ${cardTooltipAttributes(card, listing.rarity)}>
+
+        <div class="card-info">
+          <strong>${escapeHtml(card.name)}</strong>
+          <small>
+            ${escapeHtml(listing.set || "Unknown set")} ·
+            ${escapeHtml(listing.region || "TCG")} ·
+            ${escapeHtml(listing.rarity || "Unknown rarity")}<br>
+            Qty: ${quantity}
+          </small>
+
+          <div class="price">${formatPrice(price)}</div>
+
+          <button class="btn remove-listing"
+                  type="button"
+                  data-listing-id="${escapeHtml(String(listing.id))}">
+            Remove
+          </button>
+        </div>
+      </article>
+    `;
+  }).join("") || `<p class="empty">No cards listed for sale.</p>`;
+}
+
+document
+  .getElementById("marketplaceListings")
+  ?.addEventListener("click", event => {
+    const button = event.target.closest(".remove-listing");
+    if (!button) return;
+
+    const listingId = button.dataset.listingId;
+
+    marketplaceListings = marketplaceListings.filter(
+      listing => String(listing.id) !== String(listingId)
+    );
+
+    saveMarketplaceListings();
+    renderMarketplaceListings();
+  });
+
+function openMarketplace(cardId) {
+  const card = localCardDatabase.find(
+    item => String(item.id) === String(cardId)
+  );
+  
+  const modal = document.getElementById("marketplaceModal");
+  const cardIdInput = document.getElementById("marketplaceCardId");
+  const cardNameInput = document.getElementById("marketplaceCardName");
+  const setSelect = document.getElementById("marketplaceSet");
+
+  if (!card || !modal || !cardIdInput || !cardNameInput || !setSelect) {
+    console.error("Marketplace elements or card not found.", {
+      cardId,
+      card,
+      modal,
+      cardIdInput,
+      cardNameInput,
+      setSelect
+    });
+    return;
+  }
+
+  cardIdInput.value = String(card.id);
+  cardNameInput.value = card.name;
+
+  const sets = [...new Map(
+    getCardPrintings(card).map(printing => [
+      `${printing.region}|${printing.set}`,
+      printing
+    ])
+  ).values()];
+
+  setSelect.innerHTML = sets.map(printing => `
+        <option value="${escapeHtml(`${printing.region}|${printing.set}`)}"
+          data-set="${escapeHtml(printing.set)}"
+            data-region="${escapeHtml(printing.region)}">
+      ${escapeHtml(printing.set)} — ${escapeHtml(printing.region)}
+    </option>
+  `).join("");
+  const preferredOption = [...setSelect.options].find(option =>
+    option.dataset.region === "AE" || option.dataset.region === "OCG"
+  );
+  if (preferredOption) setSelect.value = preferredOption.value;
+
+  updateMarketplaceRarities(card);
+
+  modal.classList.add("open");
+}
+
+function updateMarketplaceRarities(card) {
+  const setSelect = document.getElementById("marketplaceSet");
+  const set = setSelect.selectedOptions[0]?.dataset.set || "";
+  const region = setSelect.selectedOptions[0]?.dataset.region || "TCG";
+  const rarities = [...new Set(
+    getCardPrintings(card)
+      .filter(printing => printing.set === set && printing.region === region)
+      .map(printing => printing.rarity || "")
+  )];
+  const raritySelect = document.getElementById("marketplaceRarity");
+
+  raritySelect.innerHTML = rarities
+    .map(rarity =>
+      `<option value="${escapeHtml(rarity)}"
+                  data-tcg-rarity="${escapeHtml(
+                    TCGC_RAR[rarity] || rarity
+                  )}">
+        ${escapeHtml(getTcgCornerRarity(rarity) || "Unknown rarity")}
+      </option>`
+    )
+    .join("") || `<p class="empty">No cards listed for sale.</p>`;
+}
+
+document
+  .getElementById("marketplaceSet")?.addEventListener("change", () => {
+    const name = document.getElementById("marketplaceCardName").value;
+    const card = localCardDatabase.find(item => item.name === name);
+    if (card) updateMarketplaceRarities(card);
+});
+
+function closeMarketplaceModal() {
+  document.getElementById("marketplaceModal").classList.remove("open");
+}
+
+function saveMarketplaceListings() {
+  localStorage.setItem(
+    "ygoMarketplaceListings",
+    JSON.stringify(marketplaceListings)
+  );
+}
+
+function saveMarketplaceListing() {
+  console.log("Add Listing clicked");
+  
+  const cardId = document.getElementById("marketplaceCardId").value;
+
+  console.log("Selected card ID:", cardId);
+  console.log("Database loaded:", localCardDatabase?.length);
+
+  const card = localCardDatabase.find(
+    item => String(item.id) === String(cardId)
+  );
+
+  if (!card) {
+    console.error("Marketplace card not found:", cardId);
+    return;
+  }
+
+  const quantity = Number(
+    document.getElementById("marketplaceQty").value
+  );
+
+  const price = Number(
+    document.getElementById("marketplacePrice").value
+  );
+
+  if (quantity < 1 || price < 0) return;
+
+  marketplaceListings.unshift({
+    id: crypto.randomUUID(),
+    cardId: String(card.id),
+    card: card.name,
+    set: document.getElementById("marketplaceSet").selectedOptions[0]?.dataset.set || "",
+    region: document.getElementById("marketplaceSet").selectedOptions[0]?.dataset.region || "TCG",
+    rarity: document.getElementById("marketplaceRarity").value,
+    quantity,
+    price,
+    createdAt: new Date().toISOString()
+  });
+
+  saveMarketplaceListings();
+  closeMarketplaceModal();
+  renderMarketplaceListings();
+}
+
+function renderMarketplace() {
+  const grid = document.getElementById("marketCardGrid");
+  const input = document.getElementById("marketCardSearch");
+
+  if (!grid) return;
+
+  const query = String(input?.value || "").trim().toLowerCase();
+
+  const matchingCards = localCardDatabase.filter(card =>
+    !query ||
+    String(card.name || "").toLowerCase().includes(query) ||
+    getCardSets(card).some(set =>
+      String(set).toLowerCase().includes(query)
+    )
+  );
+
+  grid.innerHTML = matchingCards.slice(0, 100).map(card => `
+    <article class="card">
+      <img src="${escapeHtml(card.card_images?.[0]?.image_url_small || card.image || "")}"
+           alt="${escapeHtml(card.name || "")}">
+
+      <h3>${escapeHtml(card.name || "Unknown card")}</h3>
+
+      <button type="button"
+              class="btn primary"
+              data-card-id="${escapeHtml(String(card.id))}">
+        Add Listing
+      </button>
+    </article>
+  `).join("") || "<p>No cards found.</p>";
+}
+
+document.getElementById("marketCardSearch")
+  ?.addEventListener("input", renderMarketplaceCards);
+
+const tcgCornerCacheKey = "tcgCornerPriceCache";
+const tcgCornerCache = JSON.parse(
+  localStorage.getItem(tcgCornerCacheKey) || "{}"
+);
+
+async function refreshDeckPrices() {
+  let changed = false;
+
+  for (const deckName of Object.keys(deckCards || {})) {
+    for (const entry of deckCards[deckName] || []) {
+      const card = localCardDatabase.find(
+        item => String(item.id) === String(entry.cardId)
+      );
+
+      if (!card) continue;
+
+      const printing = getCardPrintings(card).find(item =>
+        String(item.code || "") === String(entry.setCode || "") &&
+        String(item.rarity || "") === String(entry.rarity || "")
+      );
+
+      if (!printing || typeof getTcgCornerPrice !== "function") continue;
+
+      const cacheKey = [
+        card.id,
+        printing.region,
+        printing.code,
+        printing.rarity
+      ].join("|");
+
+      let price = tcgCornerCache[cacheKey];
+
+      if (price === undefined) {
+        price = await getTcgCornerPrice(card, printing);
+        if (Number.isFinite(price)) {
+          tcgCornerCache[cacheKey] = price;
+          changed = true;
+        }
+      }
+
+      if (Number.isFinite(price)) {
+        entry.tcgCornerPrice = price;
+        entry.price = price;
+      }
+    }
+  }
+
+  if (changed) {
+    localStorage.setItem(
+      tcgCornerCacheKey,
+      JSON.stringify(tcgCornerCache)
+    );
+    saveData();
+  }
+
+  renderDecks();
+}
+
+let detailSelectedCard = null;
+
+function populateDetailSetOptions(card) {
+  detailSelectedCard = card;
+
+  const setSelect = document.getElementById("detailCardSetSelect");
+  const raritySelect = document.getElementById("detailCardRaritySelect");
+  const setDisplay = document.getElementById("detailCardSet");
+
+  if (!setSelect || !raritySelect) return;
+
+  const printings = getCardPrintings(card);
+
+  const sets = [...new Map(
+    printings.map(printing => [
+      `${printing.region}:${printing.set}`,
+      printing
+    ])
+  ).values()];
+
+  setSelect.innerHTML = sets.map(printing => `
+        <option value="${escapeHtml(`${printing.region}|${printing.set}`)}"
+          data-set="${escapeHtml(printing.set)}"
+            data-region="${escapeHtml(printing.region)}">
+      ${escapeHtml(printing.set)}
+    </option>
+  `).join("");
+
+  setDisplay.innerHTML = sets.map(printing => `
+    <div>
+      ${escapeHtml(printing.setName || printing.set)}
+      (${escapeHtml(printing.code)}) —
+      ${escapeHtml(printing.region)}
+    </div>
+  `).join("");
+
+  updateDetailRarityOptions();
+}
+
+function updateDetailRarityOptions() {
+  const setSelect = document.getElementById("detailCardSetSelect");
+  const raritySelect = document.getElementById("detailCardRaritySelect");
+
+  if (!setSelect || !raritySelect || !detailSelectedCard) return;
+
+  const selectedOption = setSelect.options[setSelect.selectedIndex];
+  const selectedSet = selectedOption?.dataset.set || "";
+  const selectedRegion = selectedOption?.dataset.region || "TCG";
+
+  const rarities = [...new Set(
+    getCardPrintings(detailSelectedCard)
+      .filter(printing =>
+        printing.set === selectedSet &&
+        printing.region === selectedRegion
+      )
+      .map(printing => printing.rarity || "")
+  )];
+
+  raritySelect.innerHTML = rarities.length
+    ? rarities.map(rarity => {
+        const tcgCode = getTcgCornerRarity(rarity);
+
+        return `
+          <option value="${escapeHtml(rarity)}"
+                  data-tcg-rarity="${escapeHtml(tcgCode)}"
+                  title="${escapeHtml(rarity)}">
+            ${escapeHtml(tcgCode || "Unknown rarity")}
+          </option>`;
+      }).join("")
+    : `<option value="">No rarity available</option>`;
+}
+
+document
+  .getElementById("detailCardSetSelect")
+  ?.addEventListener("change", updateDetailRarityOptions);
+
+document
+  .getElementById("addDetailCardToDeck")
+  ?.addEventListener("click", () => {
+    if (!detailSelectedCard) return;
+
+    const deckName = activeDeck || decks[0];
+    if (!deckName) {
+      alert("Create or select a deck first.");
+      return;
+    }
+
+    const setSelect = document.getElementById("detailCardSetSelect");
+    const raritySelect = document.getElementById("detailCardRaritySelect");
+    const quantity = Number(
+      document.getElementById("detailCardQuantity").value
+    ) || 1;
+
+    const selectedOption =
+      setSelect.options[setSelect.selectedIndex];
+
+    const region = selectedOption?.dataset.region || "TCG";
+    const selectedSet = setSelect.value;
+    const selectedRarity = raritySelect.value;
+
+    const printing = getCardPrintings(detailSelectedCard).find(item =>
+      item.set === selectedSet &&
+      item.region === region &&
+      item.rarity === selectedRarity
+    );
+
+    if (!printing) {
+      alert("No matching card printing was found.");
+      return;
+    }
+
+    addCardEntryToDeck(
+      deckName,
+      detailSelectedCard,
+      quantity,
+      selectedRarity,
+      getTcgCornerRarity(selectedRarity),
+      selectedSet,
+      region
+    );
+
+    saveData();
+    renderDecks();
+  });
+
+function getTcgCornerRarity(rarity) {
+  const key = String(rarity || "").trim();
+  return TCGC_RAR[key] || key;
+}
+
+function renderMarketplaceCards() {
+  const grid = document.getElementById("marketCardGrid");
+  const search = document.getElementById("marketCardSearch");
+
+  if (!grid) return;
+
+  const query = String(search?.value || "").trim().toLowerCase();
+  const source = Array.isArray(localCardDatabase)
+    ? localCardDatabase
+    : Array.isArray(cards)
+      ? cards
+      : [];
+
+  const results = source.filter(card => {
+    const name = String(card.name || "").toLowerCase();
+    const code = String(card.cardCode || "").toLowerCase();
+
+    return !query || name.includes(query) || code.includes(query);
+  });
+
+  grid.innerHTML = results.map(card => {
+    const image =
+      card.image ||
+      card.card_images?.[0]?.image_url_small || card.image || "" ;
+
+    return `
+      <article class="card marketplace-card">
+        <img src="${escapeHtml(image)}"
+             alt="${escapeHtml(card.name || "")}">
+
+        <h3>${escapeHtml(card.name || "Unknown card")}</h3>
+
+        <button type="button"
+                class="btn primary"
+                data-card-id="${escapeHtml(String(card.id))}">
+          Add Listing
+        </button>
+      </article>
+    `;
+  }).join("") || "<p>No cards found.</p>";
+}
+
+document.getElementById("marketCardSearch")
+  ?.addEventListener("input", renderMarketplaceCards);
+
+document
+  .getElementById("marketCardGrid")
+  ?.addEventListener("click", event => {
+    const button = event.target.closest("[data-card-id]");
+    if (!button) return;
+
+    openMarketplace(button.dataset.cardId);
+  });
+
+loadLocalCardDatabase()
+  .then(() => {
+    renderDashboard();
+    renderCollection();
+    renderSpending();
+    renderDecks();
+    refreshDeckPrices();
+    renderCards();
+    renderMarketplace();
+    renderMarketplaceCards();
+    renderMarketplaceListings();
+  })
+  .catch(error => console.error(error));
+
+loadBanlists().then(() => {
+  setActiveBanlist(activeBanlist || "AE");
+});

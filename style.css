@@ -1,4 +1,4 @@
-  :root {
+:root {
     --bg: #0b0e13;
     --panel: #121720;
     --panel2: #171d27;
@@ -131,7 +131,21 @@
   .collection-card-tile:hover { z-index:5; transform:scale(1.14); box-shadow:0 14px 30px rgba(0,0,0,.45); }
   .collection-card-tile img { width:100%; height:100%; object-fit:contain; display:block; background:#0e1219; }
   .collection-card-tile .card-image { height:100%; }
-  
+  .card-sets-list {
+    display: grid;
+    gap: 8px;
+  }
+  .card-set-row {
+    display: grid;
+    grid-template-columns: 70px 1fr auto 1fr;
+    gap: 8px;
+    padding: 9px;
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+  }
+  .card-set-row small {
+    color: var(--muted);
+  }
   .collection-card-details { position:absolute; inset:auto 0 0; padding:10px; background:rgba(10,13,19,.9); font-size:12px; }
   .collection-card-details strong, .collection-card-details small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .collection-card-details small { color:var(--muted); margin-top:3px; }
@@ -376,6 +390,52 @@
 .close-card-details:hover {
     background: rgba(0, 0, 0, 0.08);
 }
+
+.card-hover-tooltip {
+  display: block;
+  position: fixed;
+  left: auto;
+  top: auto;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  max-height: 280px;
+  overflow: auto;
+  padding: 14px;
+  z-index: 999999;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0,0,0,.4);
+  pointer-events: none;
+}
+
+.card-hover-tooltip strong,
+.card-hover-tooltip small,
+.card-hover-tooltip p {
+  display: block;
+}
+
+.card-hover-tooltip small {
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.card-hover-tooltip p {
+  margin: 6px 0 0;
+  color: #d9dee7;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.card-hover-tooltip-label {
+  margin-top: 12px;
+  color: var(--gold);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
 
 
 @media (max-width: 700px) {
@@ -678,6 +738,69 @@
   color: white;
   padding: 12px;
   border-radius: 9px;
+}
+
+/* filepath: e:\ygo app\ygo.html */
+.market-searchbar {
+  position: static;
+  width: 100%;
+  margin: 0 0 18px;
+}
+
+.market-searchbar input {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+}
+
+.marketplace-listings {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  align-items: start;
+}
+
+.marketplace-listing {
+  overflow: hidden;
+}
+
+.marketplace-listing img {
+  display: block;
+  width: 120px;
+  height: 175px;
+  margin: 0 auto;
+  object-fit: contain;
+  background: #090d14;
+}
+
+.marketplace-card img {
+  display: block;
+  width: 100%;
+  height: 250px;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+.marketplace-card .card-info {
+  padding: 14px;
+}
+
+.marketplace-listing .card-info {
+  padding: 14px;
+}
+
+.marketplace-listing small {
+  display: block;
+  color: var(--muted);
+  margin: 8px 0;
+}
+
+.marketplace-listing .price {
+  color: var(--green);
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.marketplace-listing .remove-listing {
+  width: 100%;
 }
 
 label[for="banlistSelect"] h2 {
