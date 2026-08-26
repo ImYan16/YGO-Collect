@@ -2539,8 +2539,14 @@ async function loadTCGProducts(forceRefresh = false) {
 
 function getCachedTCGProducts() {
   try {
-    const cached = JSON.parse(localStorage.getItem(TCG_CORNER_CACHE_KEY) || "null");
-    return Array.isArray(cached?.cards) && cached.cards.length ? cached.cards : null;
+    const cached = JSON.parse(
+      localStorage.getItem(TCG_CORNER_CACHE_KEY) || "null"
+    );
+
+    return Array.isArray(cached?.cards) && cached.cards.length
+      ? cached.cards
+      : null;
+
   } catch (error) {
     console.warn("Unable to read the TCG Corner cache:", error);
     return null;
@@ -2549,20 +2555,60 @@ function getCachedTCGProducts() {
 
 function cacheTCGProducts(products) {
   try {
-    localStorage.setItem(TCG_CORNER_CACHE_KEY, JSON.stringify({
-      savedAt: new Date().toISOString(),
-      cards: products
+    const compactProducts = products.map(product => ({
+      id: product.id,
+      productId: product.productId,
+      cardCode: product.cardCode,
+      name: product.name,
+      variantTitle: product.variantTitle,
+      rarity: product.rarity,
+      price: product.price,
+      available: product.available,
+      image: product.image,
+      url: product.url
     }));
+
+    const cacheData = {
+      savedAt: new Date().toISOString(),
+      cards: compactProducts
+    };
+
+    const json = JSON.stringify(cacheData);
+
+    console.log(
+      `TCG Corner cache size: ${(json.length / 1024 / 1024).toFixed(2)} MB`
+    );
+
+    localStorage.setItem(TCG_CORNER_CACHE_KEY, json);
+
   } catch (error) {
-    console.warn("Unable to save the TCG Corner cache:", error);
+    if (error.name === "QuotaExceededError") {
+      console.warn(
+        "TCG Corner cache exceeds localStorage quota. Cache was skipped."
+      );
+
+      try {
+        localStorage.removeItem(TCG_CORNER_CACHE_KEY);
+      } catch (removeError) {
+        console.warn("Unable to remove old TCG Corner cache:", removeError);
+      }
+
+    } else {
+      console.warn("Unable to save the TCG Corner cache:", error);
+    }
   }
 }
 
 function finishTCGProductLoad(products, shouldCache = true) {
   cards = products;
-  if (shouldCache) cacheTCGProducts(cards);
+
+  if (shouldCache) {
+    cacheTCGProducts(cards);
+  }
+
   purchaseSearchCache.clear();
   tcgLoading = false;
+
   syncPurchasesToDecks();
   renderCards();
   populatePurchaseSelector();
