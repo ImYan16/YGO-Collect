@@ -1,4 +1,6 @@
- let userCurrency = "PHP";
+let userCurrency = "PHP";
+let exchangeRates = { USD: 1, HKD: 7.8, PHP: 58 };
+const EXCHANGE_RATE_CACHE_KEY = "ygoUsdExchangeRates";
  let localCardDatabase = [];
  let localCardDatabaseReady = false;
  let localCardDatabasePromise = null;
@@ -272,7 +274,44 @@ async function detectUserCurrency() {
         userCurrency = "PHP";
     }
 
+    await loadExchangeRates();
     updateCurrencyDisplay();
+}
+
+async function loadExchangeRates() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(EXCHANGE_RATE_CACHE_KEY) || "null");
+    const age = cached?.savedAt ? Date.now() - new Date(cached.savedAt).getTime() : Infinity;
+    if (cached?.rates && age < 12 * 60 * 60 * 1000) {
+      exchangeRates = { ...exchangeRates, ...cached.rates };
+      return;
+    }
+
+    const response = await fetch("https://open.er-api.com/v6/latest/USD");
+    if (!response.ok) throw new Error(`Exchange-rate service returned HTTP ${response.status}`);
+    const data = await response.json();
+    if (data?.result !== "success" || !data.rates) throw new Error("Exchange-rate data was unavailable");
+    exchangeRates = { ...exchangeRates, ...data.rates };
+    localStorage.setItem(EXCHANGE_RATE_CACHE_KEY, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      rates: exchangeRates
+    }));
+  } catch (error) {
+    console.warn("Using fallback exchange rates:", error);
+  }
+}
+
+function convertStorePrice(price, storeCurrency) {
+  const sourceRate = Number(exchangeRates[storeCurrency]) || 1;
+  const targetRate = Number(exchangeRates[userCurrency]) || 1;
+  return (Number(price) || 0) / sourceRate * targetRate;
+}
+
+function formatStorePrice(price, currency) {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: currency || userCurrency
+  }).format(Number(price) || 0);
 }
 
 
@@ -2363,7 +2402,7 @@ function updateCardRarity(select) {
 
   cardItem.querySelector(".card-price").textContent = money(card.price);
   cardItem.querySelector(".card-stock").textContent =
-    `${card.available ? "In stock" : "Out of stock"} · TCG Corner`;
+    `${card.available ? "In stock" : "Out of stock"} · ${escapeHtml(card.sourceName || "TCG Corner")}`;
 
   const purchaseButton = cardItem.querySelector(".card-purchase");
   purchaseButton.dataset.cardId = card.id;
@@ -2429,14 +2468,18 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
   tcgError = "";
   renderCards();
 
-  const bakedProducts = await loadBakedTCGPriceCatalog();
-  const playersClubProducts = await loadBakedPlayersClubPriceCatalog();
-  if (bakedProducts || playersClubProducts) {
+  if (!forceRefresh) {
+    const bakedProducts = await loadBakedTCGPriceCatalog();
+    const playersClubProducts = await loadBakedPlayersClubPriceCatalog();
+    const cachedProducts = bakedProducts ? null : getCachedTCGProducts();
+    const tcgProducts = bakedProducts || cachedProducts;
+    if (tcgProducts || playersClubProducts) {
       finishTCGProductLoad(
-        [...(bakedProducts || []), ...(playersClubProducts || [])],
+        [...(tcgProducts || []), ...(playersClubProducts || [])],
         false
       );
-    return;
+      return;
+    }
   }
 
   if (!forceRefresh) {
@@ -2514,6 +2557,16 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
 
     finishTCGProductLoad(nextCards);
   } catch (error) {
+    const bakedProducts = await loadBakedTCGPriceCatalog();
+    const playersClubProducts = await loadBakedPlayersClubPriceCatalog();
+    if (bakedProducts || playersClubProducts) {
+      finishTCGProductLoad(
+        [...(bakedProducts || []), ...(playersClubProducts || [])],
+        false
+      );
+      console.warn("Live TCG Corner sync failed; static catalog retained.", error);
+      return;
+    }
     tcgLoading = false;
     tcgError = backgroundRefresh ? "" : error.message || "The browser could not fetch the feed.";
     if (backgroundRefresh) console.warn("Background TCG Corner refresh failed:", error);
@@ -2557,7 +2610,9 @@ async function loadBakedPlayersClubPriceCatalog() {
           variantTitle: String(row[3] || "Default"),
           rarity: String(row[3] || "Other"),
           cardText: card?.cardText || card?.desc || "",
-          price,
+          storePrice: price,
+          storeCurrency: "HKD",
+          price: convertStorePrice(price, "HKD"),
           available: Boolean(row[5]),
           image: card?.image || "",
           tags: "Asian English Players Club",
@@ -2707,7 +2762,10 @@ function cacheTCGProducts(products) {
 function finishTCGProductLoad(products, shouldCache = true) {
   cards = products.map(card => ({
     ...card,
-    sourceName: card.sourceName || "TCG Corner"
+    sourceName: card.sourceName || "TCG Corner",
+    price: card.storeCurrency
+      ? convertStorePrice(card.storePrice ?? card.price, card.storeCurrency)
+      : Number(card.price || 0)
   }));
 
   if (shouldCache) {
