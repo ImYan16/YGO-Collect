@@ -2312,6 +2312,15 @@ function getCardName(title) {
     .trim();
 }
 
+function getCardNameKey(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[’‘`´]/g, "'")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
 function queueCardRender() {
   clearTimeout(cardRenderTimer);
   cardRenderTimer = setTimeout(renderCards, 300);
@@ -2341,7 +2350,8 @@ function renderCards() {
 
   const groups = new Map();
   cards.forEach(card => {
-    const groupKey = `${card.sourceLanguage}|${card.cardCode || card.productId}`;
+    const groupKey = getCardNameKey(card.name) ||
+      `${card.sourceLanguage}|${card.cardCode || card.productId}`;
     if (!groups.has(groupKey)) groups.set(groupKey, []);
     groups.get(groupKey).push(card);
   });
@@ -2629,7 +2639,7 @@ async function loadBakedPlayersClubPriceCatalog() {
       const cardsByCode = new Map();
       const cardsByName = new Map(
         localCardDatabase.map(card => [
-          String(card.name || "").trim().toLowerCase(),
+          getCardNameKey(card.name),
           card
         ])
       );
@@ -2642,7 +2652,7 @@ async function loadBakedPlayersClubPriceCatalog() {
       return data.rows.map((row, index) => {
         const code = String(row[0] || "").toUpperCase();
         const card = cardsByCode.get(code) ||
-          cardsByName.get(String(row[2] || "").trim().toLowerCase());
+          cardsByName.get(getCardNameKey(row[2]));
         const price = Number(row[1]);
         if (!code || !row[2] || !Number.isFinite(price)) return null;
 
@@ -2729,7 +2739,8 @@ async function loadBakedTCGPriceCatalog() {
           variantTitle: String(row[3] || "Default"),
           rarity: String(row[3] || "Other"),
           cardText: card?.cardText || card?.desc || "",
-          price,
+          storePrice: price,
+          storeCurrency: String(data.currency || "USD").toUpperCase(),
           available: Boolean(row[5]),
           image: card?.image || "",
           tags: "Asian English TCG Corner",
