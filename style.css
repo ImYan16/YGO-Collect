@@ -1,4 +1,4 @@
-    :root {
+ :root {
     --bg: #0b0e13;
     --panel: #121720;
     --panel2: #171d27;
@@ -429,7 +429,7 @@
 
 .card-hover-tooltip p {
   margin: 6px 0 0;
-  color: #d9dee7;
+    color: var(--tooltip-text, #d9dee7);
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-line;
@@ -459,6 +459,23 @@
 @media(max-width:1000px) {
   aside {
     width: 72px;
+  }
+
+  body[data-theme="light"] .collection-card-details {
+    background: rgba(255, 252, 246, .94);
+    color: #2b2824;
+  }
+
+  body[data-theme="light"] .collection-card-details small,
+  body[data-theme="light"] .card-hover-tooltip small {
+    color: #665f56;
+  }
+
+  body[data-theme="light"] .card-hover-tooltip {
+    --tooltip-text: #2b2824;
+    background: #fffdf8;
+    color: #2b2824;
+    border-color: #774532;
   }
   .logo {
     font-size: 0;
