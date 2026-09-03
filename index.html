@@ -20,6 +20,19 @@
       <button data-page="market"><img src="./data/icons/basket.png" alt="Market"> Market Place</button>
     </nav>
     <button type="button" class="sync-nav-button" id="syncTCGButton" onclick="syncTCGCorner()">Sync TCG Corner</button>
+    <label for="theme" class="theme">
+      <span>Light</span>
+      <span class="theme__toggle-wrap">
+        <input id="theme" class="theme__toggle" type="checkbox" role="switch" name="theme" value="dark">
+        <span class="theme__fill"></span>
+        <span class="theme__icon" aria-hidden="true">
+          <span class="theme__icon-part"></span><span class="theme__icon-part"></span><span class="theme__icon-part"></span>
+          <span class="theme__icon-part"></span><span class="theme__icon-part"></span><span class="theme__icon-part"></span>
+          <span class="theme__icon-part"></span><span class="theme__icon-part"></span><span class="theme__icon-part"></span>
+        </span>
+      </span>
+      <span>Dark</span>
+    </label>
   </aside>
 
   <main>
@@ -129,7 +142,7 @@
       <div class="searchbar market-searchbar">
         <input id="marketCardSearch"
               oninput="renderMarketplace()"
-              placeholder="Search cards...">
+            placeholder="Search by card name or card code to browse cards for sale.">
       </div>
       <section class="section card">
         <h2>Your Listings</h2>
@@ -211,8 +224,6 @@
       <button type="button" class="btn primary" id="appConfirmAccept">Confirm</button>
     </div>
   </div>
-</div>
-  </main>
 </div>
 
 
