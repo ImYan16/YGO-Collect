@@ -1,4 +1,4 @@
- let userCurrency = "PHP";
+let userCurrency = "PHP";
 let exchangeRates = { USD: 1, HKD: 7.8, PHP: 58 };
 const EXCHANGE_RATE_CACHE_KEY = "ygoUsdExchangeRates";
  let localCardDatabase = [];
@@ -1931,7 +1931,7 @@ function openPurchase() {
   populatePurchaseDestinations();
   const groups = new Map();
   cards.forEach(card => {
-    const key = `${card.sourceLanguage}|${card.cardCode || card.productId}`;
+    const key = `${card.sourceName || "TCG Corner"}|${card.sourceLanguage}|${card.cardCode || card.productId}`;
     if (!groups.has(key)) groups.set(key, card);
   });
   select.innerHTML = [...groups.values()].map(card => `<option value="${escapeHtml(card.id)}">${escapeHtml(card.name)} · ${escapeHtml(card.cardCode)}</option>`).join("");
@@ -2341,7 +2341,7 @@ function renderCards() {
 
   const groups = new Map();
   cards.forEach(card => {
-    const groupKey = `${card.sourceName || "TCG Corner"}|${card.sourceLanguage}|${card.cardCode || card.productId}`;
+    const groupKey = `${card.sourceLanguage}|${card.cardCode || card.productId}`;
     if (!groups.has(groupKey)) groups.set(groupKey, []);
     groups.get(groupKey).push(card);
   });
@@ -2356,7 +2356,37 @@ function renderCards() {
 
   grid.innerHTML = filteredGroups.map(variants => {
     const card = variants[0];
-    const rarityOptions = [...new Map(variants.map(variant => [variant.rarity, variant])).values()];
+    const sourceGroups = new Map();
+    variants.forEach(variant => {
+      const sourceName = variant.sourceName || "TCG Corner";
+      if (!sourceGroups.has(sourceName)) sourceGroups.set(sourceName, []);
+      sourceGroups.get(sourceName).push(variant);
+    });
+    const sourceControls = ["TCG Corner", "Players Club"]
+      .map(sourceName => {
+        const sourceVariants = sourceGroups.get(sourceName) || [];
+        const sourceId = sourceName === "TCG Corner" ? "tcg" : "playersclub";
+        const rarityOptions = [...new Map(
+          sourceVariants.map(variant => [variant.rarity, variant])
+        ).values()];
+        const firstVariant = sourceVariants[0];
+        const disabled = !firstVariant;
+
+        return `
+          <div class="price-source-control">
+            <label class="label">${escapeHtml(sourceName)} rarity
+              <select class="source-rarity-select" data-source="${sourceId}" onchange="updateCardSource(this)" ${disabled ? "disabled" : ""}>
+                ${disabled
+                  ? `<option>No price data available</option>`
+                  : rarityOptions.map(variant => `<option value="${escapeHtml(variant.id)}">${escapeHtml(variant.rarity)} · ${money(variant.price)}</option>`).join("")}
+              </select>
+            </label>
+            <div class="source-price" data-source-price="${sourceId}">${firstVariant ? money(firstVariant.price) : "No price data"}</div>
+            <button class="btn primary card-purchase" data-card-id="${escapeHtml(firstVariant?.id || "")}" data-source="${sourceId}" onclick="openPurchaseFor(this.dataset.cardId)" ${disabled ? "disabled" : ""}>Add ${escapeHtml(sourceName)} Purchase</button>
+          </div>
+        `;
+      }).join("");
+
     return `<div class="card card-item">
       <div class="card-image">
       ${
@@ -2375,20 +2405,27 @@ function renderCards() {
       <div class="card-info">
         <strong>${escapeHtml(card.name)}</strong>
         <small>${escapeHtml(card.cardCode)}</small>
-        <label class="label" style="margin-top:8px;">Rarity
-          <select onchange="updateCardRarity(this)">
-            ${rarityOptions.map(variant => `<option value="${escapeHtml(variant.id)}">${escapeHtml(variant.rarity)} · ${money(variant.price)}</option>`).join("")}
-          </select>
-        </label>
-        <div style="margin-top:8px;" class="gold card-price">${money(card.price)}</div>
-        <div style="margin-top:6px;" class="label card-stock">${card.available ? "In stock" : "Out of stock"} · ${escapeHtml(card.sourceName || "TCG Corner")}</div>
-        <div class="row-actions">
-          <button class="btn primary card-purchase" data-card-id="${escapeHtml(card.id)}" onclick="openPurchaseFor(this.dataset.cardId)">Add ${escapeHtml(card.sourceName || "TCG Corner")} Purchase</button>
-          ${card.url ? `<a class="btn card-view" href="${escapeHtml(card.url)}" target="_blank" rel="noopener">View</a>` : ""}
-        </div>
+        <div class="source-price-controls">${sourceControls}</div>
+        <div style="margin-top:6px;" class="label card-stock">${card.available ? "In stock" : "Out of stock"}</div>
+        ${card.url ? `<div class="row-actions"><a class="btn card-view" href="${escapeHtml(card.url)}" target="_blank" rel="noopener">View</a></div>` : ""}
       </div>
     </div>`;
   }).join("") || `<div class="card empty" style="grid-column:1/-1;">No matching Yu-Gi-Oh products found.</div>`;
+}
+
+function updateCardSource(select) {
+  const selectedCard = cards.find(
+    item => String(item.id) === String(select.value)
+  );
+  if (!selectedCard) return;
+
+  const sourceId = select.dataset.source;
+  const cardItem = select.closest(".card-item");
+  const priceElement = cardItem.querySelector(`[data-source-price="${sourceId}"]`);
+  const purchaseButton = cardItem.querySelector(`.card-purchase[data-source="${sourceId}"]`);
+
+  if (priceElement) priceElement.textContent = money(selectedCard.price);
+  if (purchaseButton) purchaseButton.dataset.cardId = selectedCard.id;
 }
 
 function updateCardRarity(select) {
@@ -2416,7 +2453,9 @@ function openPurchaseFor(id) {
   openPurchase();
   const cardOption = [...document.getElementById("purchaseCard").options].find(option => {
     const optionCard = cards.find(card => String(card.id) === String(option.value));
-    return optionCard && optionCard.sourceLanguage === selectedCard.sourceLanguage &&
+    return optionCard &&
+      (optionCard.sourceName || "TCG Corner") === (selectedCard.sourceName || "TCG Corner") &&
+      optionCard.sourceLanguage === selectedCard.sourceLanguage &&
       (optionCard.cardCode ? optionCard.cardCode === selectedCard.cardCode : optionCard.productId === selectedCard.productId);
   });
   if (cardOption) document.getElementById("purchaseCard").value = cardOption.value;
