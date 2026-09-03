@@ -1,0 +1,35 @@
+name: Update TCG Corner prices
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 19 * * 0"
+
+permissions:
+  contents: write
+
+jobs:
+  update-prices:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Perl dependencies
+        run: sudo apt-get update && sudo apt-get install --yes perl curl
+
+      - name: Harvest TCG Corner prices
+        run: perl Tools/ae-prices-tcgcorner.pl
+
+      - name: Commit updated price data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tcgc-prices.json
+          if [ -f Tools/played-stock.json ]; then git add Tools/played-stock.json; fi
+          if git diff --cached --quiet; then
+            echo "No price changes to commit"
+          else
+            git commit -m "Update TCG Corner prices"
+            git push
+          fi
