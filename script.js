@@ -367,6 +367,8 @@ const TCG_FEEDS = [
 const TCG_GLOBAL_FEED = "https://tcg-corner.com/products.json";
 const TCG_CORNER_CACHE_KEY = "ygoTCGCornerCards";
 const MAX_TCG_FEED_PAGES = 24;
+const BAKED_TCG_PRICES_FILE = "./tcgc-prices.json";
+let bakedTCGPriceCatalogPromise = null;
 
 const TCGC_RAR = {
   C: "C",
@@ -2457,6 +2459,12 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
   tcgError = "";
   renderCards();
 
+  const bakedProducts = await loadBakedTCGPriceCatalog();
+  if (bakedProducts) {
+    finishTCGProductLoad(bakedProducts, false);
+    return;
+  }
+
   if (!forceRefresh) {
     const cachedProducts = getCachedTCGProducts();
     if (cachedProducts) {
@@ -2537,6 +2545,58 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
     if (backgroundRefresh) console.warn("Background TCG Corner refresh failed:", error);
     renderCards();
   }
+}
+
+async function loadBakedTCGPriceCatalog() {
+  if (bakedTCGPriceCatalogPromise) return bakedTCGPriceCatalogPromise;
+
+  bakedTCGPriceCatalogPromise = fetch(BAKED_TCG_PRICES_FILE, {
+    headers: { "Accept": "application/json" }
+  })
+    .then(response => {
+      if (!response.ok) return null;
+      return response.json();
+    })
+    .then(data => {
+      if (!Array.isArray(data?.rows) || !data.rows.length) return null;
+
+      const cardsByCode = new Map();
+      localCardDatabase.forEach(card => {
+        getCardPrintings(card).forEach(printing => {
+          cardsByCode.set(String(printing.code || "").toUpperCase(), card);
+        });
+      });
+
+      const products = data.rows.map((row, index) => {
+        const code = String(row[0] || "").toUpperCase();
+        const card = cardsByCode.get(code);
+        const price = Number(row[1]);
+        if (!code || !row[2] || !Number.isFinite(price)) return null;
+
+        return {
+          id: `baked-${index}-${code}`,
+          productId: `baked-${code}`,
+          cardCode: code,
+          name: String(row[2]),
+          variantTitle: String(row[3] || "Default"),
+          rarity: String(row[3] || "Other"),
+          cardText: card?.cardText || card?.desc || "",
+          price,
+          available: Boolean(row[5]),
+          image: card?.image || "",
+          tags: "Asian English TCG Corner",
+          url: ""
+        };
+      }).filter(Boolean);
+
+      return products.length ? products : null;
+    })
+    .catch(error => {
+      console.info("No baked TCG Corner price file available; using live catalog.", error);
+      return null;
+    });
+
+  return bakedTCGPriceCatalogPromise;
 }
 
 function getCachedTCGProducts() {
