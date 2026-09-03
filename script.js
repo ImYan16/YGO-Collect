@@ -1,4 +1,21 @@
- let userCurrency = "PHP";
+let userCurrency = "PHP";
+const savedTheme = localStorage.getItem("ygoTheme") || "dark";
+document.documentElement.dataset.theme = savedTheme;
+
+function setupThemeToggle() {
+  const themeToggle = document.getElementById("theme");
+  if (!themeToggle) return;
+
+  document.body.dataset.theme = savedTheme;
+  themeToggle.checked = savedTheme === "dark";
+  themeToggle.addEventListener("change", () => {
+    const nextTheme = themeToggle.checked ? "dark" : "light";
+    document.body.dataset.theme = nextTheme;
+    localStorage.setItem("ygoTheme", nextTheme);
+  });
+}
+
+document.addEventListener("DOMContentLoaded", setupThemeToggle);
  let localCardDatabase = [];
  let localCardDatabaseReady = false;
  let localCardDatabasePromise = null;
@@ -349,8 +366,7 @@ const TCG_FEEDS = [
 ];
 const TCG_GLOBAL_FEED = "https://tcg-corner.com/products.json";
 const TCG_CORNER_CACHE_KEY = "ygoTCGCornerCards";
-const BAKED_TCG_PRICES_FILE = "./tcgc-prices.json";
-let bakedTCGPriceCatalogPromise = null;
+const MAX_TCG_FEED_PAGES = 24;
 
 const TCGC_RAR = {
   C: "C",
@@ -428,10 +444,7 @@ function showPage(page) {
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.page === page));
   if(page === "dashboard") renderDashboard();
   if(page === "collection") renderCollection();
-  if(page === "spending") {
-    renderSpending();
-    if (!cards.length && !tcgLoading) loadTCGProducts();
-  }
+  if(page === "spending") renderSpending();
   if(page === "cards") {
     if (!cards.length && !tcgLoading) loadTCGProducts();
     renderCards();
@@ -889,10 +902,15 @@ function normaliseYgoProCard(card) {
         cardText: card.desc || "",
 
         // Small image for lists and card pickers
-        image: getCardImageUrl(card),
+        image:
+            card.card_images?.[0]?.image_url_small ||
+            card.card_images?.[0]?.image_url ||
+            "",
 
         // Full image for large previews
-        imageFull: getCardImageUrl(card, false),
+        imageFull:
+            card.card_images?.[0]?.image_url ||
+            "",
 
         price: 0,
 
@@ -966,7 +984,22 @@ async function loadDeckApiCards() {
     await loadLocalCardDatabase();
     cardDatabase = localCardDatabase;
 
-    cardDatabase = localCardDatabase;
+    if (!response.ok) {
+      throw new Error(
+        `Card database returned HTTP ${response.status}.`
+      );
+    }
+
+    const data = await response.json();
+
+    cardDatabase = Array.isArray(data.data)
+      ? data.data.map(card => ({
+          ...card,
+          image: card.card_images?.[0]?.image_url || "",
+          cardText: card.desc || "",
+          cardCode: card.asian_english_sets?.[0]?.card_code || ""
+        }))
+      : [];
 
     //console.log(
     //  "Loaded cards.json:",
@@ -1227,7 +1260,8 @@ async function showCardDetails(card) {
     card.desc || card.cardText || "N/A";
 
   const image = document.getElementById("detailCardImage");
-  const imageUrl = getCardImageUrl(card, false);
+  const imageUrl =
+    card.card_images?.[0]?.image_url || card.image || "";
 
   if (imageUrl) {
     image.src = imageUrl;
@@ -1750,7 +1784,8 @@ function addCardEntryToDeck(
       : null,
     tcgCornerPrice: null,
     cardText: localCard.cardText || localCard.desc || "",
-    image: getCardImageUrl(localCard, false),
+    image: localCard.image ||
+      localCard.card_images?.[0]?.image_url || localCard.image|| "",
     cardCode: printing.code,
     qty: 0,
     copyIds: []
@@ -2158,7 +2193,7 @@ function renderPurchaseCardMatches(searchId, matchesId) {
     const card = variants[0];
     const rarityOptions = [...new Map(variants.map(variant => [variant.rarity, variant])).values()];
     return `<div class="spending-card-match">
-      <div class="spending-card-match-identity"><strong>${escapeHtml(card.name)}</strong><small>${escapeHtml(card.cardCode)} · ${escapeHtml(card.sourceLanguage || "Catalog")}</small></div>
+      <div><strong>${escapeHtml(card.name)}</strong><small>${escapeHtml(card.cardCode)}</small></div>
       <select onchange="updateSpendingPurchase(this)">
         ${rarityOptions.map(variant => `<option value="${escapeHtml(variant.id)}">${escapeHtml(variant.rarity)} · ${money(variant.price)}</option>`).join("")}
       </select>
@@ -2167,7 +2202,7 @@ function renderPurchaseCardMatches(searchId, matchesId) {
   }).join("");
 
   const resultMarkup = resultCards
-    ? `<div class="spending-card-match-list">${resultCards}</div>`
+    ? `<div style="width:min(460px,100%); margin:0 0 0 auto; display:grid; gap:8px;">${resultCards}</div>`
     : `<div class="empty">No cards match this name or card code.</div>`;
   purchaseSearchCache.set(cacheKey, resultMarkup);
   matchesContainer.innerHTML = resultMarkup;
@@ -2384,7 +2419,7 @@ async function loadCollectionProducts(feed) {
   const products = [];
   const seen = new Set();
 
-  for (let page = 1; page <= 100; page++) {
+  for (let page = 1; page <= MAX_TCG_FEED_PAGES; page++) {
     let response;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -2427,12 +2462,6 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
     if (cachedProducts) {
       finishTCGProductLoad(cachedProducts, false);
       if (isTCGCacheStale()) void loadTCGProducts(true, true);
-      return;
-    }
-
-    const bakedProducts = await loadBakedTCGPriceCatalog();
-    if (bakedProducts) {
-      finishTCGProductLoad(bakedProducts, false);
       return;
     }
   }
@@ -2517,65 +2546,17 @@ function getCachedTCGProducts() {
     );
 
     return Array.isArray(cached?.cards) && cached.cards.length
-      ? cached.cards
+      ? cached.cards.map(card => ({
+          ...card,
+          tags: card.tags || "",
+          cardText: card.cardText || ""
+        }))
       : null;
 
   } catch (error) {
     console.warn("Unable to read the TCG Corner cache:", error);
     return null;
   }
-}
-
-async function loadBakedTCGPriceCatalog() {
-  if (bakedTCGPriceCatalogPromise) return bakedTCGPriceCatalogPromise;
-
-  bakedTCGPriceCatalogPromise = fetch(BAKED_TCG_PRICES_FILE, {
-    headers: { "Accept": "application/json" }
-  })
-    .then(response => {
-      if (!response.ok) return null;
-      return response.json();
-    })
-    .then(data => {
-      if (!Array.isArray(data?.rows) || !data.rows.length) return null;
-
-      const cardsByCode = new Map();
-      localCardDatabase.forEach(card => {
-        getCardPrintings(card).forEach(printing => {
-          cardsByCode.set(String(printing.code || "").toUpperCase(), card);
-        });
-      });
-
-      const products = data.rows.map((row, index) => {
-        const code = String(row[0] || "").toUpperCase();
-        const card = cardsByCode.get(code);
-        const price = Number(row[1]);
-        if (!code || !row[2] || !Number.isFinite(price)) return null;
-
-        return {
-          id: `baked-${index}-${code}`,
-          productId: `baked-${code}`,
-          cardCode: code,
-          name: String(row[2]),
-          variantTitle: String(row[3] || "Default"),
-          rarity: String(row[3] || "Other"),
-          cardText: card?.cardText || card?.desc || "",
-          price,
-          available: Boolean(row[5]),
-          image: card?.image || "",
-          tags: "Asian English TCG Corner",
-          url: ""
-        };
-      }).filter(Boolean);
-
-      return products.length ? products : null;
-    })
-    .catch(error => {
-      console.info("No baked TCG Corner price file available; using live catalog.", error);
-      return null;
-    });
-
-  return bakedTCGPriceCatalogPromise;
 }
 
 function isTCGCacheStale() {
@@ -2597,10 +2578,10 @@ function cacheTCGProducts(products) {
       name: product.name,
       variantTitle: product.variantTitle,
       rarity: product.rarity,
-      cardText: product.cardText,
       price: product.price,
       available: product.available,
       image: product.image,
+      tags: product.tags || "",
       url: product.url
     }));
 
@@ -3085,7 +3066,7 @@ function renderMarketplaceListings() {
 
     if (!card) return "";
     
-    const image = getCardImageUrl(card);
+    const image = card.card_images?.[0]?.image_url_small || card.image || "";
     const quantity = Number(listing.quantity ?? listing.qty ?? 1);
     const price = Number(listing.price || 0);
 
@@ -3275,7 +3256,7 @@ function renderMarketplace() {
   const query = String(input?.value || "").trim().toLowerCase();
 
   if (!query) {
-    grid.innerHTML = "";
+    grid.innerHTML = `<div class="empty" style="grid-column:1/-1;">Search by card name or set to browse cards for sale.</div>`;
     return;
   }
 
@@ -3288,7 +3269,7 @@ function renderMarketplace() {
 
   grid.innerHTML = matchingCards.slice(0, 100).map(card => `
     <article class="card">
-      <img src="${escapeHtml(getCardImageUrl(card))}"
+      <img src="${escapeHtml(card.card_images?.[0]?.image_url_small || card.image || "")}"
            alt="${escapeHtml(card.name || "")}">
 
       <h3>${escapeHtml(card.name || "Unknown card")}</h3>
@@ -3502,7 +3483,7 @@ function renderMarketplaceCards() {
   const query = String(search?.value || "").trim().toLowerCase();
 
   if (!query) {
-    grid.innerHTML = "";
+    grid.innerHTML = `<div class="empty" style="grid-column:1/-1;">Search by card name or card code to browse cards for sale.</div>`;
     return;
   }
 
@@ -3520,7 +3501,9 @@ function renderMarketplaceCards() {
   });
 
   grid.innerHTML = results.map(card => {
-    const image = getCardImageUrl(card);
+    const image =
+      card.image ||
+      card.card_images?.[0]?.image_url_small || card.image || "" ;
 
     return `
       <article class="card marketplace-card">
@@ -3578,35 +3561,15 @@ document.addEventListener("keydown", event => {
 
 loadLocalCardDatabase()
   .then(() => {
-    const cachedProducts = getCachedTCGProducts();
-    if (cachedProducts) finishTCGProductLoad(cachedProducts, false);
     renderDashboard();
     renderCollection();
     renderSpending();
     renderDecks();
     renderCards();
+    loadTCGProducts();
   })
   .catch(error => console.error(error));
 
 loadBanlists().then(() => {
   setActiveBanlist(activeBanlist || "AE");
 });
-
-if ("serviceWorker" in navigator && location.protocol === "https:") {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js", { scope: "./" })
-      .catch(error => console.warn("Offline cache unavailable:", error));
-  });
-}
-
-const savedTheme = localStorage.getItem("ygoTheme") || "dark";
-document.body.dataset.theme = savedTheme;
-const themeToggle = document.getElementById("theme");
-if (themeToggle) {
-  themeToggle.checked = savedTheme === "dark";
-  themeToggle.addEventListener("change", () => {
-    const nextTheme = themeToggle.checked ? "dark" : "light";
-    document.body.dataset.theme = nextTheme;
-    localStorage.setItem("ygoTheme", nextTheme);
-  });
-}
