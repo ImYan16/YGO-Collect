@@ -17,6 +17,12 @@ let userCurrency = "PHP";
   "./data/ocg.json"
 ];
 
+function getCardImageUrl(card, preferSmall = true) {
+  return preferSmall
+    ? card?.card_images?.[0]?.image_url_small || card?.card_images?.[0]?.image_url || card?.image || ""
+    : card?.card_images?.[0]?.image_url || card?.image || "";
+}
+
 async function loadLocalCardDatabase() {
   if (localCardDatabasePromise) return localCardDatabasePromise;
 
@@ -68,10 +74,7 @@ async function loadLocalCardDatabase() {
       return {
         ...card,
 
-        image:
-          card.card_images?.[0]?.image_url_small ||
-          card.card_images?.[0]?.image_url ||
-          "",
+        image: getCardImageUrl(card),
 
         cardText: card.desc || "",
         cardCode: getPrimaryCardCode(card),
@@ -830,10 +833,11 @@ function renderDeckProfile() {
           const rarity = entry.rarity || "";
           const image = card?.image ? `<img src="${escapeHtml(card.image)}" alt="${escapeHtml(name)}">` : `<div class="card-image">No image</div>`;
           const copyNumber = entry.copyIds.indexOf(copyId) + 1;
+          const cardLimit = Math.max(1, Math.min(3, getCardLimit(name)));
           
           return `<div class="deck-list-card" data-deck-copy-id="${escapeHtml(copyId)}" draggable="true">
             ${image}
-            <span class="deck-list-quantity">${copyNumber}/${entry.qty}</span>
+            <span class="deck-list-quantity">${copyNumber}/${cardLimit}</span>
             <button class="deck-list-remove" title="Remove one copy" onclick="removeCardFromDeck('${escapeHtml(copyId)}')">×</button>
             <div class="deck-list-tooltip">
               <strong>${escapeHtml(name)}</strong>
@@ -880,15 +884,10 @@ function normaliseYgoProCard(card) {
         cardText: card.desc || "",
 
         // Small image for lists and card pickers
-        image:
-            card.card_images?.[0]?.image_url_small ||
-            card.card_images?.[0]?.image_url ||
-            "",
+        image: getCardImageUrl(card),
 
         // Full image for large previews
-        imageFull:
-            card.card_images?.[0]?.image_url ||
-            "",
+        imageFull: getCardImageUrl(card, false),
 
         price: 0,
 
@@ -962,22 +961,7 @@ async function loadDeckApiCards() {
     await loadLocalCardDatabase();
     cardDatabase = localCardDatabase;
 
-    if (!response.ok) {
-      throw new Error(
-        `Card database returned HTTP ${response.status}.`
-      );
-    }
-
-    const data = await response.json();
-
-    cardDatabase = Array.isArray(data.data)
-      ? data.data.map(card => ({
-          ...card,
-          image: card.card_images?.[0]?.image_url || "",
-          cardText: card.desc || "",
-          cardCode: card.asian_english_sets?.[0]?.card_code || ""
-        }))
-      : [];
+    cardDatabase = localCardDatabase;
 
     //console.log(
     //  "Loaded cards.json:",
@@ -1238,8 +1222,7 @@ async function showCardDetails(card) {
     card.desc || card.cardText || "N/A";
 
   const image = document.getElementById("detailCardImage");
-  const imageUrl =
-    card.card_images?.[0]?.image_url || card.image || "";
+  const imageUrl = getCardImageUrl(card, false);
 
   if (imageUrl) {
     image.src = imageUrl;
@@ -1762,8 +1745,7 @@ function addCardEntryToDeck(
       : null,
     tcgCornerPrice: null,
     cardText: localCard.cardText || localCard.desc || "",
-    image: localCard.image ||
-      localCard.card_images?.[0]?.image_url || localCard.image|| "",
+    image: getCardImageUrl(localCard, false),
     cardCode: printing.code,
     qty: 0,
     copyIds: []
@@ -2062,34 +2044,12 @@ function renderCollection() {
 
       const card = cards.find(
         c => String(c.id) === String(r.cardId)
+      ) || localCardDatabase.find(
+        c => String(c.name || "").trim().toLowerCase() === String(r.card || "").trim().toLowerCase()
       );
 
       const market =
         (card?.price || 0) * r.qty;
-
-      /*
-       * Get the card's limit from the active banlist.
-       *
-       * 0 = Forbidden
-       * 1 = Limited
-       * 2 = Semi-Limited
-       * 3 = Unlimited
-       */
-      const cardLimit = getCardLimit(r.card);
-
-      let banlistClass = "banlist-unlimited";
-      let banlistText = "3";
-
-      if (cardLimit === 0) {
-        banlistClass = "banlist-forbidden";
-        banlistText = "0";
-      } else if (cardLimit === 1) {
-        banlistClass = "banlist-limited";
-        banlistText = "1";
-      } else if (cardLimit === 2) {
-        banlistClass = "banlist-semi-limited";
-        banlistText = "2";
-      }
 
       return `
         <div class="collection-card-tile">
@@ -2111,18 +2071,10 @@ function renderCollection() {
           }
 
           <span
-            class="collection-card-quantity ${banlistClass}"
-            title="${
-              cardLimit === 0
-                ? "Forbidden"
-                : cardLimit === 1
-                  ? "Limited"
-                  : cardLimit === 2
-                    ? "Semi-Limited"
-                    : "Unlimited"
-            }"
+            class="collection-card-quantity"
+            title="Owned quantity"
           >
-            ${banlistText}
+            ${r.qty}
           </span>
 
           <button
@@ -2201,7 +2153,7 @@ function renderPurchaseCardMatches(searchId, matchesId) {
     const card = variants[0];
     const rarityOptions = [...new Map(variants.map(variant => [variant.rarity, variant])).values()];
     return `<div class="spending-card-match">
-      <div><strong>${escapeHtml(card.name)}</strong><small>${escapeHtml(card.cardCode)}</small></div>
+      <div class="spending-card-match-identity"><strong>${escapeHtml(card.name)}</strong><small>${escapeHtml(card.cardCode)} · ${escapeHtml(card.sourceLanguage || "Catalog")}</small></div>
       <select onchange="updateSpendingPurchase(this)">
         ${rarityOptions.map(variant => `<option value="${escapeHtml(variant.id)}">${escapeHtml(variant.rarity)} · ${money(variant.price)}</option>`).join("")}
       </select>
@@ -2210,7 +2162,7 @@ function renderPurchaseCardMatches(searchId, matchesId) {
   }).join("");
 
   const resultMarkup = resultCards
-    ? `<div style="width:min(460px,100%); margin:0 0 0 auto; display:grid; gap:8px;">${resultCards}</div>`
+    ? `<div class="spending-card-match-list">${resultCards}</div>`
     : `<div class="empty">No cards match this name or card code.</div>`;
   purchaseSearchCache.set(cacheKey, resultMarkup);
   matchesContainer.innerHTML = resultMarkup;
@@ -2460,7 +2412,7 @@ async function loadCollectionProducts(feed) {
   return products.map(product => ({ ...product, sourceLanguage: feed.language }));
 }
 
-async function loadTCGProducts(forceRefresh = false) {
+async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) {
   tcgLoading = true;
   tcgError = "";
   renderCards();
@@ -2469,6 +2421,7 @@ async function loadTCGProducts(forceRefresh = false) {
     const cachedProducts = getCachedTCGProducts();
     if (cachedProducts) {
       finishTCGProductLoad(cachedProducts, false);
+      if (isTCGCacheStale()) void loadTCGProducts(true, true);
       return;
     }
   }
@@ -2529,10 +2482,19 @@ async function loadTCGProducts(forceRefresh = false) {
         url: product.handle ? `https://tcg-corner.com/products/${product.handle}` : ""
       }));
     });
+    const previousCards = getCachedTCGProducts();
+    if (previousCards && previousCards.length >= 100 &&
+        nextCards.length < previousCards.length * 0.85) {
+      throw new Error(
+        `Sync returned only ${nextCards.length} cards; keeping the previous catalog of ${previousCards.length}.`
+      );
+    }
+
     finishTCGProductLoad(nextCards);
   } catch (error) {
     tcgLoading = false;
-    tcgError = error.message || "The browser could not fetch the feed.";
+    tcgError = backgroundRefresh ? "" : error.message || "The browser could not fetch the feed.";
+    if (backgroundRefresh) console.warn("Background TCG Corner refresh failed:", error);
     renderCards();
   }
 }
@@ -2553,6 +2515,16 @@ function getCachedTCGProducts() {
   }
 }
 
+function isTCGCacheStale() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(TCG_CORNER_CACHE_KEY) || "null");
+    const savedAt = Date.parse(cached?.savedAt || "");
+    return !Number.isFinite(savedAt) || Date.now() - savedAt >= 30 * 24 * 60 * 60 * 1000;
+  } catch (error) {
+    return true;
+  }
+}
+
 function cacheTCGProducts(products) {
   try {
     const compactProducts = products.map(product => ({
@@ -2562,6 +2534,7 @@ function cacheTCGProducts(products) {
       name: product.name,
       variantTitle: product.variantTitle,
       rarity: product.rarity,
+      cardText: product.cardText,
       price: product.price,
       available: product.available,
       image: product.image,
@@ -3049,7 +3022,7 @@ function renderMarketplaceListings() {
 
     if (!card) return "";
     
-    const image = card.card_images?.[0]?.image_url_small || card.image || "";
+    const image = getCardImageUrl(card);
     const quantity = Number(listing.quantity ?? listing.qty ?? 1);
     const price = Number(listing.price || 0);
 
@@ -3238,8 +3211,12 @@ function renderMarketplace() {
 
   const query = String(input?.value || "").trim().toLowerCase();
 
+  if (!query) {
+    grid.innerHTML = "";
+    return;
+  }
+
   const matchingCards = localCardDatabase.filter(card =>
-    !query ||
     String(card.name || "").toLowerCase().includes(query) ||
     getCardSets(card).some(set =>
       String(set).toLowerCase().includes(query)
@@ -3248,7 +3225,7 @@ function renderMarketplace() {
 
   grid.innerHTML = matchingCards.slice(0, 100).map(card => `
     <article class="card">
-      <img src="${escapeHtml(card.card_images?.[0]?.image_url_small || card.image || "")}"
+      <img src="${escapeHtml(getCardImageUrl(card))}"
            alt="${escapeHtml(card.name || "")}">
 
       <h3>${escapeHtml(card.name || "Unknown card")}</h3>
@@ -3460,6 +3437,12 @@ function renderMarketplaceCards() {
   if (!grid) return;
 
   const query = String(search?.value || "").trim().toLowerCase();
+
+  if (!query) {
+    grid.innerHTML = "";
+    return;
+  }
+
   const source = Array.isArray(localCardDatabase)
     ? localCardDatabase
     : Array.isArray(cards)
@@ -3470,17 +3453,15 @@ function renderMarketplaceCards() {
     const name = String(card.name || "").toLowerCase();
     const code = String(card.cardCode || "").toLowerCase();
 
-    return !query || name.includes(query) || code.includes(query);
+    return name.includes(query) || code.includes(query);
   });
 
   grid.innerHTML = results.map(card => {
-    const image =
-      card.image ||
-      card.card_images?.[0]?.image_url_small || card.image || "" ;
+    const image = getCardImageUrl(card);
 
     return `
       <article class="card marketplace-card">
-        <img src="${escapeHtml(image)}"
+        <img loading="lazy" decoding="async" src="${escapeHtml(image)}"
              alt="${escapeHtml(card.name || "")}">
 
         <h3>${escapeHtml(card.name || "Unknown card")}</h3>
@@ -3546,3 +3527,22 @@ loadLocalCardDatabase()
 loadBanlists().then(() => {
   setActiveBanlist(activeBanlist || "AE");
 });
+
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js", { scope: "./" })
+      .catch(error => console.warn("Offline cache unavailable:", error));
+  });
+}
+
+const savedTheme = localStorage.getItem("ygoTheme") || "dark";
+document.body.dataset.theme = savedTheme;
+const themeToggle = document.getElementById("theme");
+if (themeToggle) {
+  themeToggle.checked = savedTheme === "dark";
+  themeToggle.addEventListener("change", () => {
+    const nextTheme = themeToggle.checked ? "dark" : "light";
+    document.body.dataset.theme = nextTheme;
+    localStorage.setItem("ygoTheme", nextTheme);
+  });
+}
