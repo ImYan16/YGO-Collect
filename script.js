@@ -1,4 +1,4 @@
-let userCurrency = "PHP";
+ let userCurrency = "PHP";
  let localCardDatabase = [];
  let localCardDatabaseReady = false;
  let localCardDatabasePromise = null;
@@ -349,6 +349,8 @@ const TCG_FEEDS = [
 ];
 const TCG_GLOBAL_FEED = "https://tcg-corner.com/products.json";
 const TCG_CORNER_CACHE_KEY = "ygoTCGCornerCards";
+const BAKED_TCG_PRICES_FILE = "./tcgc-prices.json";
+let bakedTCGPriceCatalogPromise = null;
 
 const TCGC_RAR = {
   C: "C",
@@ -426,7 +428,10 @@ function showPage(page) {
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.page === page));
   if(page === "dashboard") renderDashboard();
   if(page === "collection") renderCollection();
-  if(page === "spending") renderSpending();
+  if(page === "spending") {
+    renderSpending();
+    if (!cards.length && !tcgLoading) loadTCGProducts();
+  }
   if(page === "cards") {
     if (!cards.length && !tcgLoading) loadTCGProducts();
     renderCards();
@@ -2424,6 +2429,12 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
       if (isTCGCacheStale()) void loadTCGProducts(true, true);
       return;
     }
+
+    const bakedProducts = await loadBakedTCGPriceCatalog();
+    if (bakedProducts) {
+      finishTCGProductLoad(bakedProducts, false);
+      return;
+    }
   }
 
   try {
@@ -2513,6 +2524,58 @@ function getCachedTCGProducts() {
     console.warn("Unable to read the TCG Corner cache:", error);
     return null;
   }
+}
+
+async function loadBakedTCGPriceCatalog() {
+  if (bakedTCGPriceCatalogPromise) return bakedTCGPriceCatalogPromise;
+
+  bakedTCGPriceCatalogPromise = fetch(BAKED_TCG_PRICES_FILE, {
+    headers: { "Accept": "application/json" }
+  })
+    .then(response => {
+      if (!response.ok) return null;
+      return response.json();
+    })
+    .then(data => {
+      if (!Array.isArray(data?.rows) || !data.rows.length) return null;
+
+      const cardsByCode = new Map();
+      localCardDatabase.forEach(card => {
+        getCardPrintings(card).forEach(printing => {
+          cardsByCode.set(String(printing.code || "").toUpperCase(), card);
+        });
+      });
+
+      const products = data.rows.map((row, index) => {
+        const code = String(row[0] || "").toUpperCase();
+        const card = cardsByCode.get(code);
+        const price = Number(row[1]);
+        if (!code || !row[2] || !Number.isFinite(price)) return null;
+
+        return {
+          id: `baked-${index}-${code}`,
+          productId: `baked-${code}`,
+          cardCode: code,
+          name: String(row[2]),
+          variantTitle: String(row[3] || "Default"),
+          rarity: String(row[3] || "Other"),
+          cardText: card?.cardText || card?.desc || "",
+          price,
+          available: Boolean(row[5]),
+          image: card?.image || "",
+          tags: "Asian English TCG Corner",
+          url: ""
+        };
+      }).filter(Boolean);
+
+      return products.length ? products : null;
+    })
+    .catch(error => {
+      console.info("No baked TCG Corner price file available; using live catalog.", error);
+      return null;
+    });
+
+  return bakedTCGPriceCatalogPromise;
 }
 
 function isTCGCacheStale() {
@@ -3515,12 +3578,13 @@ document.addEventListener("keydown", event => {
 
 loadLocalCardDatabase()
   .then(() => {
+    const cachedProducts = getCachedTCGProducts();
+    if (cachedProducts) finishTCGProductLoad(cachedProducts, false);
     renderDashboard();
     renderCollection();
     renderSpending();
     renderDecks();
     renderCards();
-    loadTCGProducts();
   })
   .catch(error => console.error(error));
 
