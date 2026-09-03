@@ -1,4 +1,4 @@
- :root {
+:root {
     --bg: #0b0e13;
     --panel: #121720;
     --panel2: #171d27;
@@ -95,6 +95,11 @@
   .card-info { padding:14px; }
   .card-info strong { display:block; margin-bottom:5px; }
   .card-info small { color:var(--muted); }
+  .source-price-controls { display:grid; gap:10px; margin-top:10px; }
+  .price-source-control { display:grid; gap:6px; padding-top:8px; border-top:1px solid var(--border); }
+  .price-source-control .label { gap:5px; }
+  .source-price { color:var(--gold); font-weight:700; }
+  .price-source-control .card-purchase { width:100%; }
   .deck-card-picker { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; margin-bottom:18px; }
   .deck-builder-layout { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr); gap:18px; align-items:start; }
   .deck-picker-panel { min-width:0; padding-left:18px; border-left:1px solid var(--border); }
@@ -954,6 +959,20 @@ body[data-theme="light"] .notice { background: #ddd2c2; border-color: #c2ad91; c
 body[data-theme="light"] .collection-card-quantity { background: rgba(55,42,34,.86); color: #fffdf8; }
 body[data-theme="light"] nav button img { filter: brightness(0) saturate(100%) opacity(.72); }
 body[data-theme="light"] .theme__toggle:checked ~ .theme__icon .theme__icon-part:first-child { box-shadow:-3px 1px 0 2px #e4dfd5 inset; }
+body[data-theme="light"] .deck-list-tooltip,
+body[data-theme="light"] .card-hover-tooltip {
+  background: #fffdf8;
+  color: #2b2824;
+  border-color: #774532;
+}
+body[data-theme="light"] .deck-list-tooltip small,
+body[data-theme="light"] .card-hover-tooltip small {
+  color: #665f56;
+}
+body[data-theme="light"] .deck-list-tooltip p,
+body[data-theme="light"] .card-hover-tooltip p {
+  color: #2b2824;
+}
 
 .theme { display:flex; align-items:center; justify-content:center; gap:5px; width:100%; margin-top:14px; color:var(--muted); font-size:11px; user-select:none; }
 .theme__toggle-wrap { position:relative; display:block; margin:0 3px; }
