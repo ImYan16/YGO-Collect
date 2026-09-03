@@ -1,4 +1,4 @@
-let userCurrency = "PHP";
+ let userCurrency = "PHP";
 let exchangeRates = { USD: 1, HKD: 7.8, PHP: 58 };
 const EXCHANGE_RATE_CACHE_KEY = "ygoUsdExchangeRates";
  let localCardDatabase = [];
@@ -3708,13 +3708,12 @@ document.addEventListener("keydown", event => {
 
 loadLocalCardDatabase()
   .then(() => {
-    const cachedProducts = getCachedTCGProducts();
-    if (cachedProducts) finishTCGProductLoad(cachedProducts, false);
     renderDashboard();
     renderCollection();
     renderSpending();
     renderDecks();
     renderCards();
+    loadTCGProducts();
   })
   .catch(error => console.error(error));
 
