@@ -1,0 +1,172 @@
+use strict;
+use warnings;
+use JSON::PP qw(decode_json encode_json);
+use File::Basename qw(dirname);
+use File::Path qw(make_path);
+
+binmode(STDOUT, ':encoding(UTF-8)');
+
+# Harvest TCG Corner Asian-English singles for GitHub Actions.
+# Run from the repository root:
+#   perl Tools/ae-prices-tcgcorner.pl
+#
+# The output is a compact snapshot for a static GitHub Pages deployment.
+# The browser never runs this script.
+
+my $UA = 'Mozilla/5.0 (compatible; YGO-Collect price harvester)';
+my $COLLECTION = 'yu-gi-oh-single-card-asia-english';
+my $BASE = "https://tcg-corner.com/collections/$COLLECTION/products.json";
+my $OUT = 'tcgc-prices.json';
+my $MAX_PAGES = 60;
+my $PAGE_SIZE = 250;
+
+sub json_from {
+  my ($body, $url) = @_;
+  my $json = eval { decode_json($body) };
+  die "Invalid JSON from $url: $@\n" unless $json && ref($json) eq 'HASH';
+  return $json;
+}
+
+sub parse_title {
+  my ($raw) = @_;
+  return unless defined $raw;
+
+  # Examples: CR12-AE097 Card Name (UL) and CR12-AE097 Card Name (UL) (Status B)
+  return unless $raw =~ /^\s*([A-Z0-9]{2,8}-AE[SC]?[0-9]{2,4})\s+(.*)$/i;
+  my ($code, $rest) = (uc($1), $2);
+
+  my $condition = '';
+  $condition = uc($1) if $raw =~ /\(\s*Status\s*([A-Za-z])\s*\)/i;
+  $condition = 'D' if !$condition && $raw =~ /damaged|\bDMG\b|played/i;
+
+  my $without_status = $rest;
+  $without_status =~ s/\(\s*Status[^)]*\)\s*//gi;
+  $without_status =~ s/\s+$//;
+
+  my $rarity = '';
+  $rarity = $1 if $without_status =~ /\(\s*([A-Za-z][A-Za-z'’._\/-]*(?:\s+[A-Za-z][A-Za-z'’._\/-]*)*)\s*\)\s*$/;
+  $rarity =~ s/^\s+|\s+$//g if $rarity;
+  $rarity = uc($rarity) if $rarity;
+
+  $rest =~ s/\(\s*Status[^)]*\)//gi;
+  $rest =~ s/\(\s*[A-Za-z][A-Za-z'’._\/-]*(?:\s+[A-Za-z][A-Za-z'’._\/-]*)*\s*\)\s*$//;
+  $rest =~ s/\s+/ /g;
+  $rest =~ s/^\s+|\s+$//g;
+
+  return {
+    code => $code,
+    name => $rest,
+    rarity => $rarity,
+    condition => $condition
+  };
+}
+
+sub run_curl {
+  my ($url) = @_;
+  my $command = sprintf(
+    'curl --fail --silent --show-error --location --max-time 60 --user-agent "%s" "%s"',
+    $UA,
+    $url
+  );
+  my $body = `$command`;
+  die "curl failed for $url (exit $? )\n" if $? != 0;
+  return $body;
+}
+
+my @rows;
+my $skipped = 0;
+my %seen;
+
+for my $page (1 .. $MAX_PAGES) {
+  my $url = "$BASE?limit=$PAGE_SIZE&page=$page";
+  printf "page %2d ... ", $page;
+
+  my $json = json_from(run_curl($url), $url);
+  my $products = $json->{products};
+  die "Unexpected response from $url: products is not an array\n"
+    unless ref($products) eq 'ARRAY';
+
+  last unless @$products;
+  my $page_rows = 0;
+
+  for my $product (@$products) {
+    next unless ref($product) eq 'HASH';
+
+    my $parsed = parse_title($product->{title});
+    unless ($parsed) {
+      $skipped++;
+      next;
+    }
+
+    my $variants = $product->{variants};
+    $variants = [{}] unless ref($variants) eq 'ARRAY' && @$variants;
+
+    for my $variant (@$variants) {
+      next unless ref($variant) eq 'HASH';
+      my $price = defined $variant->{price} ? 0 + $variant->{price} : 0;
+      my $available = exists $variant->{available}
+        ? ($variant->{available} ? 1 : 0)
+        : 1;
+      my $variant_rarity = $parsed->{rarity} || $variant->{title} || '';
+      my $key = join('|', $parsed->{code}, $variant_rarity, $parsed->{condition}, $price, $available);
+      next if $seen{$key}++;
+
+      if ($price <= 0) {
+        $skipped++;
+        next;
+      }
+
+      push @rows, [
+        $parsed->{code},
+        $price,
+        $parsed->{name},
+        $variant_rarity,
+        $parsed->{condition},
+        $available
+      ];
+      $page_rows++;
+    }
+  }
+
+  printf "%d products, %d rows added\n", scalar(@$products), $page_rows;
+  last if @$products < $PAGE_SIZE;
+}
+
+die "Nothing harvested. The collection name may have changed: $COLLECTION\n"
+  unless @rows;
+
+my @prices = sort { $a <=> $b } map { $_->[1] } @rows;
+my $median = $prices[int(@prices / 2)] || 0;
+my $currency = $median > 60 ? 'PHP' : 'USD';
+my @time = localtime;
+my $date = sprintf '%04d-%02d-%02d', $time[5] + 1900, $time[4] + 1, $time[3];
+
+my $output_dir = dirname($OUT);
+make_path($output_dir) if $output_dir ne '.' && !-d $output_dir;
+open my $output, '>:raw', $OUT or die "Cannot write $OUT: $!\n";
+print {$output} encode_json({
+  generatedAt => $date,
+  currency => $currency,
+  source => 'TCG Corner',
+  collection => $COLLECTION,
+  rows => \@rows
+});
+close $output or die "Cannot close $OUT: $!\n";
+
+my @played = grep { $_->[4] } @rows;
+if (@played) {
+  my $played_out = 'Tools/played-stock.json';
+  open my $played_file, '>:raw', $played_out
+    or die "Cannot write $played_out: $!\n";
+  print {$played_file} encode_json({
+    generatedAt => $date,
+    currency => $currency,
+    source => 'TCG Corner',
+    rows => \@played
+  });
+  close $played_file or die "Cannot close $played_out: $!\n";
+  printf "%d played rows -> %s\n", scalar(@played), $played_out;
+}
+
+printf "\n%d price rows -> %s (currency %s, median %.2f)\n", scalar(@rows), $OUT, $currency, $median;
+printf "%d listings skipped\n", $skipped if $skipped;
