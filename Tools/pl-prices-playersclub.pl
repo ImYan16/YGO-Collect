@@ -28,7 +28,7 @@ sub parse_title {
   my ($raw) = @_;
   return unless defined $raw;
 
-  return unless $raw =~ /^\s*([A-Z0-9]{2,8}-AE[SC]?[0-9]{2,4})\s+(.*)$/i;
+  return unless $raw =~ /^\s*([A-Z0-9]{2,12}-[A-Z]{2,5}[A-Z0-9]{1,6})\s+(.*)$/i;
   my ($code, $rest) = (uc($1), $2);
 
   my $condition = '';
