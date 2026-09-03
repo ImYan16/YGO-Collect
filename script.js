@@ -1,21 +1,4 @@
-let userCurrency = "PHP";
-const savedTheme = localStorage.getItem("ygoTheme") || "dark";
-document.documentElement.dataset.theme = savedTheme;
-
-function setupThemeToggle() {
-  const themeToggle = document.getElementById("theme");
-  if (!themeToggle) return;
-
-  document.body.dataset.theme = savedTheme;
-  themeToggle.checked = savedTheme === "dark";
-  themeToggle.addEventListener("change", () => {
-    const nextTheme = themeToggle.checked ? "dark" : "light";
-    document.body.dataset.theme = nextTheme;
-    localStorage.setItem("ygoTheme", nextTheme);
-  });
-}
-
-document.addEventListener("DOMContentLoaded", setupThemeToggle);
+ let userCurrency = "PHP";
  let localCardDatabase = [];
  let localCardDatabaseReady = false;
  let localCardDatabasePromise = null;
@@ -366,9 +349,11 @@ const TCG_FEEDS = [
 ];
 const TCG_GLOBAL_FEED = "https://tcg-corner.com/products.json";
 const TCG_CORNER_CACHE_KEY = "ygoTCGCornerCards";
-const MAX_TCG_FEED_PAGES = 24;
 const BAKED_TCG_PRICES_FILE = "./tcgc-prices.json";
+const MAX_TCG_FEED_PAGES = 24;
+const PLAYERS_CLUB_PRICE_FILE = "./playersclub-prices.json";
 let bakedTCGPriceCatalogPromise = null;
+let bakedPlayersClubPriceCatalogPromise = null;
 
 const TCGC_RAR = {
   C: "C",
@@ -446,7 +431,10 @@ function showPage(page) {
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.page === page));
   if(page === "dashboard") renderDashboard();
   if(page === "collection") renderCollection();
-  if(page === "spending") renderSpending();
+  if(page === "spending") {
+    renderSpending();
+    if (!cards.length && !tcgLoading) loadTCGProducts();
+  }
   if(page === "cards") {
     if (!cards.length && !tcgLoading) loadTCGProducts();
     renderCards();
@@ -904,15 +892,10 @@ function normaliseYgoProCard(card) {
         cardText: card.desc || "",
 
         // Small image for lists and card pickers
-        image:
-            card.card_images?.[0]?.image_url_small ||
-            card.card_images?.[0]?.image_url ||
-            "",
+        image: getCardImageUrl(card),
 
         // Full image for large previews
-        imageFull:
-            card.card_images?.[0]?.image_url ||
-            "",
+        imageFull: getCardImageUrl(card, false),
 
         price: 0,
 
@@ -986,22 +969,7 @@ async function loadDeckApiCards() {
     await loadLocalCardDatabase();
     cardDatabase = localCardDatabase;
 
-    if (!response.ok) {
-      throw new Error(
-        `Card database returned HTTP ${response.status}.`
-      );
-    }
-
-    const data = await response.json();
-
-    cardDatabase = Array.isArray(data.data)
-      ? data.data.map(card => ({
-          ...card,
-          image: card.card_images?.[0]?.image_url || "",
-          cardText: card.desc || "",
-          cardCode: card.asian_english_sets?.[0]?.card_code || ""
-        }))
-      : [];
+    cardDatabase = localCardDatabase;
 
     //console.log(
     //  "Loaded cards.json:",
@@ -1262,8 +1230,7 @@ async function showCardDetails(card) {
     card.desc || card.cardText || "N/A";
 
   const image = document.getElementById("detailCardImage");
-  const imageUrl =
-    card.card_images?.[0]?.image_url || card.image || "";
+  const imageUrl = getCardImageUrl(card, false);
 
   if (imageUrl) {
     image.src = imageUrl;
@@ -1786,8 +1753,7 @@ function addCardEntryToDeck(
       : null,
     tcgCornerPrice: null,
     cardText: localCard.cardText || localCard.desc || "",
-    image: localCard.image ||
-      localCard.card_images?.[0]?.image_url || localCard.image|| "",
+    image: getCardImageUrl(localCard, false),
     cardCode: printing.code,
     qty: 0,
     copyIds: []
@@ -2195,7 +2161,7 @@ function renderPurchaseCardMatches(searchId, matchesId) {
     const card = variants[0];
     const rarityOptions = [...new Map(variants.map(variant => [variant.rarity, variant])).values()];
     return `<div class="spending-card-match">
-      <div><strong>${escapeHtml(card.name)}</strong><small>${escapeHtml(card.cardCode)}</small></div>
+      <div class="spending-card-match-identity"><strong>${escapeHtml(card.name)}</strong><small>${escapeHtml(card.cardCode)} · ${escapeHtml(card.sourceLanguage || "Catalog")}</small></div>
       <select onchange="updateSpendingPurchase(this)">
         ${rarityOptions.map(variant => `<option value="${escapeHtml(variant.id)}">${escapeHtml(variant.rarity)} · ${money(variant.price)}</option>`).join("")}
       </select>
@@ -2204,7 +2170,7 @@ function renderPurchaseCardMatches(searchId, matchesId) {
   }).join("");
 
   const resultMarkup = resultCards
-    ? `<div style="width:min(460px,100%); margin:0 0 0 auto; display:grid; gap:8px;">${resultCards}</div>`
+    ? `<div class="spending-card-match-list">${resultCards}</div>`
     : `<div class="empty">No cards match this name or card code.</div>`;
   purchaseSearchCache.set(cacheKey, resultMarkup);
   matchesContainer.innerHTML = resultMarkup;
@@ -2265,6 +2231,10 @@ function getCardText(value) {
   if (def) return def[1].trim();
 
   return text;
+}
+
+function getCardDescription(card) {
+  return String(card?.cardText || card?.desc || "Card text unavailable.").trim();
 }
 
 function isAllowedLanguage(product, variant) {
@@ -2332,7 +2302,7 @@ function renderCards() {
 
   const groups = new Map();
   cards.forEach(card => {
-    const groupKey = `${card.sourceLanguage}|${card.cardCode || card.productId}`;
+    const groupKey = `${card.sourceName || "TCG Corner"}|${card.sourceLanguage}|${card.cardCode || card.productId}`;
     if (!groups.has(groupKey)) groups.set(groupKey, []);
     groups.get(groupKey).push(card);
   });
@@ -2372,9 +2342,9 @@ function renderCards() {
           </select>
         </label>
         <div style="margin-top:8px;" class="gold card-price">${money(card.price)}</div>
-        <div style="margin-top:6px;" class="label card-stock">${card.available ? "In stock" : "Out of stock"} · TCG Corner</div>
+        <div style="margin-top:6px;" class="label card-stock">${card.available ? "In stock" : "Out of stock"} · ${escapeHtml(card.sourceName || "TCG Corner")}</div>
         <div class="row-actions">
-          <button class="btn primary card-purchase" data-card-id="${escapeHtml(card.id)}" onclick="openPurchaseFor(this.dataset.cardId)">Add Purchase</button>
+          <button class="btn primary card-purchase" data-card-id="${escapeHtml(card.id)}" onclick="openPurchaseFor(this.dataset.cardId)">Add ${escapeHtml(card.sourceName || "TCG Corner")} Purchase</button>
           ${card.url ? `<a class="btn card-view" href="${escapeHtml(card.url)}" target="_blank" rel="noopener">View</a>` : ""}
         </div>
       </div>
@@ -2460,8 +2430,12 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
   renderCards();
 
   const bakedProducts = await loadBakedTCGPriceCatalog();
-  if (bakedProducts) {
-    finishTCGProductLoad(bakedProducts, false);
+  const playersClubProducts = await loadBakedPlayersClubPriceCatalog();
+  if (bakedProducts || playersClubProducts) {
+      finishTCGProductLoad(
+        [...(bakedProducts || []), ...(playersClubProducts || [])],
+        false
+      );
     return;
   }
 
@@ -2533,8 +2507,8 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
     const previousCards = getCachedTCGProducts();
     if (previousCards && previousCards.length >= 100 &&
         nextCards.length < previousCards.length * 0.85) {
-      throw new Error(
-        `Sync returned only ${nextCards.length} cards; keeping the previous catalog of ${previousCards.length}.`
+      console.warn(
+        `Sync returned only ${nextCards.length} cards; using the partial catalog instead of failing.`
       );
     }
 
@@ -2544,6 +2518,79 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
     tcgError = backgroundRefresh ? "" : error.message || "The browser could not fetch the feed.";
     if (backgroundRefresh) console.warn("Background TCG Corner refresh failed:", error);
     renderCards();
+  }
+}
+
+async function loadBakedPlayersClubPriceCatalog() {
+  if (bakedPlayersClubPriceCatalogPromise) return bakedPlayersClubPriceCatalogPromise;
+
+  bakedPlayersClubPriceCatalogPromise = fetch(PLAYERS_CLUB_PRICE_FILE, {
+    headers: { "Accept": "application/json" }
+  })
+    .then(response => {
+      if (!response.ok) return null;
+      return response.json();
+    })
+    .then(data => {
+      if (!Array.isArray(data?.rows) || !data.rows.length) return null;
+
+      const cardsByCode = new Map();
+      localCardDatabase.forEach(card => {
+        getCardPrintings(card).forEach(printing => {
+          cardsByCode.set(String(printing.code || "").toUpperCase(), card);
+        });
+      });
+
+      return data.rows.map((row, index) => {
+        const code = String(row[0] || "").toUpperCase();
+        const card = cardsByCode.get(code);
+        const price = Number(row[1]);
+        if (!code || !row[2] || !Number.isFinite(price)) return null;
+
+        return {
+          id: `playersclub-baked-${index}-${code}`,
+          productId: `playersclub-baked-${code}`,
+          sourceName: "Players Club",
+          sourceLanguage: "Asian English",
+          cardCode: code,
+          name: String(row[2]),
+          variantTitle: String(row[3] || "Default"),
+          rarity: String(row[3] || "Other"),
+          cardText: card?.cardText || card?.desc || "",
+          price,
+          available: Boolean(row[5]),
+          image: card?.image || "",
+          tags: "Asian English Players Club",
+          url: ""
+        };
+      }).filter(Boolean);
+    })
+    .catch(error => {
+      console.info("No baked Players Club price file available; using live catalog.", error);
+      return null;
+    });
+
+  return bakedPlayersClubPriceCatalogPromise;
+}
+
+function getCachedTCGProducts() {
+  try {
+    const cached = JSON.parse(
+      localStorage.getItem(TCG_CORNER_CACHE_KEY) || "null"
+    );
+
+    return Array.isArray(cached?.cards) && cached.cards.length
+      ? cached.cards.map(card => ({
+          ...card,
+          sourceName: card.sourceName || "TCG Corner",
+          tags: card.tags || "",
+          cardText: card.cardText || ""
+        }))
+      : null;
+
+  } catch (error) {
+    console.warn("Unable to read the TCG Corner cache:", error);
+    return null;
   }
 }
 
@@ -2599,26 +2646,6 @@ async function loadBakedTCGPriceCatalog() {
   return bakedTCGPriceCatalogPromise;
 }
 
-function getCachedTCGProducts() {
-  try {
-    const cached = JSON.parse(
-      localStorage.getItem(TCG_CORNER_CACHE_KEY) || "null"
-    );
-
-    return Array.isArray(cached?.cards) && cached.cards.length
-      ? cached.cards.map(card => ({
-          ...card,
-          tags: card.tags || "",
-          cardText: card.cardText || ""
-        }))
-      : null;
-
-  } catch (error) {
-    console.warn("Unable to read the TCG Corner cache:", error);
-    return null;
-  }
-}
-
 function isTCGCacheStale() {
   try {
     const cached = JSON.parse(localStorage.getItem(TCG_CORNER_CACHE_KEY) || "null");
@@ -2634,6 +2661,7 @@ function cacheTCGProducts(products) {
     const compactProducts = products.map(product => ({
       id: product.id,
       productId: product.productId,
+      sourceName: product.sourceName || "TCG Corner",
       cardCode: product.cardCode,
       name: product.name,
       variantTitle: product.variantTitle,
@@ -2677,7 +2705,10 @@ function cacheTCGProducts(products) {
 }
 
 function finishTCGProductLoad(products, shouldCache = true) {
-  cards = products;
+  cards = products.map(card => ({
+    ...card,
+    sourceName: card.sourceName || "TCG Corner"
+  }));
 
   if (shouldCache) {
     cacheTCGProducts(cards);
@@ -3052,7 +3083,7 @@ function cardTooltipAttributes(card, rarity = "") {
     data-tooltip-code="${escapeHtml(card?.cardCode || "")}"
     data-tooltip-rarity="${escapeHtml(rarity || card?.rarity || "")}"
     data-tooltip-price="${escapeHtml(String(card?.price || 0))}"
-    data-tooltip-text="${escapeHtml( "<strong>Card Text:</strong>"+ (card?.cardText || card?.desc || "Card text unavailable.") )}"
+    data-tooltip-text="${escapeHtml("<strong>Card Text:</strong>" + getCardDescription(card))}"
   `;
 }
 
@@ -3126,7 +3157,7 @@ function renderMarketplaceListings() {
 
     if (!card) return "";
     
-    const image = card.card_images?.[0]?.image_url_small || card.image || "";
+    const image = getCardImageUrl(card);
     const quantity = Number(listing.quantity ?? listing.qty ?? 1);
     const price = Number(listing.price || 0);
 
@@ -3316,7 +3347,7 @@ function renderMarketplace() {
   const query = String(input?.value || "").trim().toLowerCase();
 
   if (!query) {
-    grid.innerHTML = `<div class="empty" style="grid-column:1/-1;">Search by card name or set to browse cards for sale.</div>`;
+    grid.innerHTML = "";
     return;
   }
 
@@ -3329,7 +3360,7 @@ function renderMarketplace() {
 
   grid.innerHTML = matchingCards.slice(0, 100).map(card => `
     <article class="card">
-      <img src="${escapeHtml(card.card_images?.[0]?.image_url_small || card.image || "")}"
+      <img src="${escapeHtml(getCardImageUrl(card))}"
            alt="${escapeHtml(card.name || "")}">
 
       <h3>${escapeHtml(card.name || "Unknown card")}</h3>
@@ -3543,7 +3574,7 @@ function renderMarketplaceCards() {
   const query = String(search?.value || "").trim().toLowerCase();
 
   if (!query) {
-    grid.innerHTML = `<div class="empty" style="grid-column:1/-1;">Search by card name or card code to browse cards for sale.</div>`;
+    grid.innerHTML = "";
     return;
   }
 
@@ -3561,9 +3592,7 @@ function renderMarketplaceCards() {
   });
 
   grid.innerHTML = results.map(card => {
-    const image =
-      card.image ||
-      card.card_images?.[0]?.image_url_small || card.image || "" ;
+    const image = getCardImageUrl(card);
 
     return `
       <article class="card marketplace-card">
@@ -3621,15 +3650,35 @@ document.addEventListener("keydown", event => {
 
 loadLocalCardDatabase()
   .then(() => {
+    const cachedProducts = getCachedTCGProducts();
+    if (cachedProducts) finishTCGProductLoad(cachedProducts, false);
     renderDashboard();
     renderCollection();
     renderSpending();
     renderDecks();
     renderCards();
-    loadTCGProducts();
   })
   .catch(error => console.error(error));
 
 loadBanlists().then(() => {
   setActiveBanlist(activeBanlist || "AE");
 });
+
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js", { scope: "./" })
+      .catch(error => console.warn("Offline cache unavailable:", error));
+  });
+}
+
+const savedTheme = localStorage.getItem("ygoTheme") || "dark";
+document.body.dataset.theme = savedTheme;
+const themeToggle = document.getElementById("theme");
+if (themeToggle) {
+  themeToggle.checked = savedTheme === "dark";
+  themeToggle.addEventListener("change", () => {
+    const nextTheme = themeToggle.checked ? "dark" : "light";
+    document.body.dataset.theme = nextTheme;
+    localStorage.setItem("ygoTheme", nextTheme);
+  });
+}
