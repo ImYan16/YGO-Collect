@@ -2627,6 +2627,12 @@ async function loadBakedPlayersClubPriceCatalog() {
       if (!Array.isArray(data?.rows) || !data.rows.length) return null;
 
       const cardsByCode = new Map();
+      const cardsByName = new Map(
+        localCardDatabase.map(card => [
+          String(card.name || "").trim().toLowerCase(),
+          card
+        ])
+      );
       localCardDatabase.forEach(card => {
         getCardPrintings(card).forEach(printing => {
           cardsByCode.set(String(printing.code || "").toUpperCase(), card);
@@ -2635,7 +2641,8 @@ async function loadBakedPlayersClubPriceCatalog() {
 
       return data.rows.map((row, index) => {
         const code = String(row[0] || "").toUpperCase();
-        const card = cardsByCode.get(code);
+        const card = cardsByCode.get(code) ||
+          cardsByName.get(String(row[2] || "").trim().toLowerCase());
         const price = Number(row[1]);
         if (!code || !row[2] || !Number.isFinite(price)) return null;
 
