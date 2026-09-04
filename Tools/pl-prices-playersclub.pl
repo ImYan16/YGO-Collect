@@ -108,7 +108,13 @@ for my $page (1 .. $MAX_PAGES) {
       my $available = exists $variant->{available}
         ? ($variant->{available} ? 1 : 0)
         : 1;
-      my $variant_rarity = $parsed->{rarity} || $variant->{title} || '';
+      my $variant_title = $variant->{title} || '';
+      my $variant_rarity = $variant_title =~ /^Default Title$/i
+        ? ($parsed->{rarity} || 'C')
+        : $variant_title;
+      $variant_rarity =~ s/^\s+|\s+$//g;
+      $variant_rarity = uc($variant_rarity) if $variant_rarity;
+      next if $variant_rarity =~ m{/} || $variant_rarity =~ /^(?:NPR|AA)$/i;
       my $key = join('|', $parsed->{code}, $variant_rarity, $parsed->{condition}, $price, $available);
       next if $seen{$key}++;
 
