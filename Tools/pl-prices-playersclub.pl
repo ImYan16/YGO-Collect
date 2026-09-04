@@ -46,12 +46,12 @@ sub parse_title {
   $without_status =~ s/\s+$//;
 
   my $rarity = '';
-  $rarity = $1 if $without_status =~ m{\(\s*((?:UR|SER|UTR|PSER|QCSE|SR|R|C|CR|ESR|ESER|EXSER|OSER|NPR|AA)(?:\s*/\s*(?:UR|SER|UTR|PSER|QCSE|SR|R|C|CR|ESR|ESER|EXSER|OSER|NPR|AA))*)\s*\)}i;
+  $rarity = $1 if $without_status =~ m{\(\s*([A-Z]{1,5}(?:\s*/\s*[A-Z]{1,5})*)\s*\)}i;
   $rarity =~ s/^\s+|\s+$//g if $rarity;
   $rarity = uc($rarity) if $rarity;
 
   $rest =~ s/\(\s*Status[^)]*\)//gi;
-  $rest =~ s{\(\s*(?:UR|SER|UTR|PSER|QCSE|SR|R|C|CR|ESR|ESER|EXSER|OSER|NPR|AA)(?:\s*/\s*(?:UR|SER|UTR|PSER|QCSE|SR|R|C|CR|ESR|ESER|EXSER|OSER|NPR|AA))*)\s*\)}{}ig;
+  $rest =~ s{\(\s*[A-Z]{1,5}(?:\s*/\s*[A-Z]{1,5})*\s*\)}{}ig;
   $rest =~ s/\s+/ /g;
   $rest =~ s/^\s+|\s+$//g;
 
