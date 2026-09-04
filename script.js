@@ -1,10 +1,10 @@
- let userCurrency = "PHP";
+let userCurrency = "PHP";
 let exchangeRates = { USD: 1, HKD: 7.8, PHP: 58 };
 const EXCHANGE_RATE_CACHE_KEY = "ygoUsdExchangeRates";
- let localCardDatabase = [];
- let localCardDatabaseReady = false;
- let localCardDatabasePromise = null;
- let banlists = {
+let localCardDatabase = [];
+let localCardDatabaseReady = false;
+let localCardDatabasePromise = null;
+let banlists = {
   TCG: {},
   AE: {},
   OCG: {}
@@ -4078,6 +4078,7 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
 }
 
 const savedTheme = localStorage.getItem("ygoTheme") || "dark";
+document.documentElement.dataset.theme = savedTheme;
 document.body.dataset.theme = savedTheme;
 const themeToggle = document.getElementById("theme");
 if (themeToggle) {
