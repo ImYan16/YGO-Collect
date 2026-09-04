@@ -1,4 +1,4 @@
-name: Update prices
+name: Update TCG Corner prices
 
 on:
   workflow_dispatch:
@@ -23,10 +23,10 @@ jobs:
 
       - name: Harvest Players Club prices
         run: perl Tools/pl-prices-playersclub.pl
-      
+
       - name: Harvest Players Club OCG prices
         run: perl Tools/pl-prices-playersclub-ocg.pl
-      
+
       - name: Commit updated price data
         run: |
           git config user.name "github-actions[bot]"
