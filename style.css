@@ -942,6 +942,19 @@ body[data-theme="light"] {
   --gold: #806019;
 }
 
+html[data-theme="dark"] body {
+  --bg: #0b0e13;
+  --panel: #121720;
+  --panel2: #171d27;
+  --border: #27303d;
+  --text: #f4f6f8;
+  --muted: #8f9aaa;
+  --accent: #7c5cff;
+  --green: #42d392;
+  --red: #ff6577;
+  --gold: #e7b95c;
+}
+
 body {
   background-color: var(--bg);
   background-image: linear-gradient(135deg, rgba(255,255,255,.06), transparent 42%), repeating-linear-gradient(0deg, rgba(255,255,255,.025) 0, rgba(255,255,255,.025) 1px, transparent 1px, transparent 5px);
