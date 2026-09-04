@@ -2517,7 +2517,7 @@ async function loadCollectionProducts(feed) {
         } finally {
           clearTimeout(timeout);
         }
-        if (response.status !== 429 || attempt === 1) break;
+        if (response.status === 429 || [500, 502, 503, 504].includes(response.status)) {   const retryAfter = Number(response.headers.get("Retry-After")) || 2;   await new Promise(resolve =>     setTimeout(resolve, Math.min(retryAfter * 1000, 10000))   ); }
         const retryAfter = Number(response.headers.get("Retry-After")) || 1;
         await new Promise(resolve => setTimeout(resolve, Math.min(retryAfter * 1000, 5000)));
       }
@@ -2530,7 +2530,7 @@ async function loadCollectionProducts(feed) {
     }
   };
 
-  await Promise.all(Array.from({ length: 4 }, worker));
+  await worker();
   const products = [];
   const seen = new Set();
   for (const pageProducts of pages) {
@@ -3111,14 +3111,35 @@ async function syncTCGCorner() {
     button.textContent = "Sync started";
   }
 
-  const refresh = loadTCGProducts(true, true);
-  const handoff = new Promise(resolve => setTimeout(resolve, 1200));
-  void Promise.race([refresh, handoff]).finally(() => {
+  async function syncTCGCorner() {
+  const button = document.getElementById("syncTCGButton");
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Syncing...";
+  }
+
+  try {
+    await loadTCGProducts(true, false);
+
     if (button) {
-      button.disabled = false;
-      button.textContent = "Sync TCG Corner";
+      button.textContent = "Sync Complete";
     }
-  });
+  } catch (error) {
+    console.error("TCG Corner sync failed:", error);
+
+    if (button) {
+      button.textContent = "Sync Failed";
+    }
+  } finally {
+    setTimeout(() => {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Sync TCG Corner";
+      }
+    }, 1500);
+  }
+}
 }
 
 window.syncTCGCorner = syncTCGCorner;
