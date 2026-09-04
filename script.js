@@ -1,4 +1,4 @@
-let userCurrency = "PHP";
+ let userCurrency = "PHP";
 let exchangeRates = { USD: 1, HKD: 7.8, PHP: 58 };
 const EXCHANGE_RATE_CACHE_KEY = "ygoUsdExchangeRates";
  let localCardDatabase = [];
@@ -3120,6 +3120,8 @@ async function syncTCGCorner() {
     }
   });
 }
+
+window.syncTCGCorner = syncTCGCorner;
 
 function populatePurchaseSelector() {
   const select = document.getElementById("purchaseCard");
