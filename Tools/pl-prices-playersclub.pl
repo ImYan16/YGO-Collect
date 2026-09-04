@@ -11,11 +11,17 @@ binmode(STDOUT, ':encoding(UTF-8)');
 #   perl Tools/pl-prices-playersclub.pl
 
 my $UA = 'Mozilla/5.0 (compatible; YGO-Collect price harvester)';
-my $COLLECTION = 'ygoae1';
+my $COLLECTION = $ENV{PLAYERS_CLUB_COLLECTION} || 'ygoae1';
 my $BASE = "https://playersclubhk.com/en/collections/$COLLECTION/products.json";
-my $OUT = 'playersclub-prices.json';
+my $OUT = $ENV{PLAYERS_CLUB_OUTPUT} || 'playersclub-prices.json';
 my $MAX_PAGES = 60;
 my $PAGE_SIZE = 250;
+
+for my $argument (@ARGV) {
+  $COLLECTION = $1 if $argument =~ /^--collection=(.+)$/;
+  $OUT = $1 if $argument =~ /^--out=(.+)$/;
+}
+$BASE = "https://playersclubhk.com/en/collections/$COLLECTION/products.json";
 
 sub json_from {
   my ($body, $url) = @_;
@@ -28,7 +34,7 @@ sub parse_title {
   my ($raw) = @_;
   return unless defined $raw;
 
-  return unless $raw =~ /^\s*([A-Z0-9]{2,12}-[A-Z]{2,5}[A-Z0-9]{1,6})\s+(.*)$/i;
+  return unless $raw =~ /^\s*([A-Z0-9]{2,12}-[A-Z]{2,5}[A-Z0-9]{1,6})\s*(.*)$/i;
   my ($code, $rest) = (uc($1), $2);
 
   my $condition = '';
@@ -40,12 +46,12 @@ sub parse_title {
   $without_status =~ s/\s+$//;
 
   my $rarity = '';
-  $rarity = $1 if $without_status =~ /\(\s*([A-Za-z][A-Za-z'’._\/-]*(?:\s+[A-Za-z][A-Za-z'’._\/-]*)*)\s*\)\s*$/;
+  $rarity = $1 if $without_status =~ /\(\s*((?:UR|SER|UTR|PSER|QCSE|SR|R|C|CR|ESR|ESER|EXSER|OSER|NPR|AA)(?:\s*\/\s*(?:UR|SER|UTR|PSER|QCSE|SR|R|C|CR|ESR|ESER|EXSER|OSER|NPR|AA))*)\s*\)/i;
   $rarity =~ s/^\s+|\s+$//g if $rarity;
   $rarity = uc($rarity) if $rarity;
 
   $rest =~ s/\(\s*Status[^)]*\)//gi;
-  $rest =~ s/\(\s*[A-Za-z][A-Za-z'’._\/-]*(?:\s+[A-Za-z][A-Za-z'’._\/-]*)*\s*\)\s*$//;
+  $rest =~ s/\(\s*(?:UR|SER|UTR|PSER|QCSE|SR|R|C|CR|ESR|ESER|EXSER|OSER|NPR|AA)(?:\s*\/\s*(?:UR|SER|UTR|PSER|QCSE|SR|R|C|CR|ESR|ESER|EXSER|OSER|NPR|AA))*)\s*\)//ig;
   $rest =~ s/\s+/ /g;
   $rest =~ s/^\s+|\s+$//g;
 
