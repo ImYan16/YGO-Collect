@@ -338,6 +338,15 @@ function updateCurrencyDisplay() {
     element.textContent = getCurrencySymbol();
   });
 
+  if (Array.isArray(cards) && cards.length) {
+    cards = cards.map(card => ({
+      ...card,
+      price: card.storeCurrency
+        ? convertStorePrice(card.storePrice ?? card.price, card.storeCurrency)
+        : Number(card.price || 0)
+    }));
+  }
+
   if (typeof renderCards === "function") renderCards();
 }
 
@@ -391,8 +400,14 @@ const TCG_CORNER_CACHE_KEY = "ygoTCGCornerCards";
 const BAKED_TCG_PRICES_FILE = "./tcgc-prices.json";
 const MAX_TCG_FEED_PAGES = 24;
 const PLAYERS_CLUB_PRICE_FILE = "./playersclub-prices.json";
+const PLAYERS_CLUB_PRODUCTS_URL = "https://playersclubhk.com/en/collections/ygoae1/products.json?limit=250&page=";
+const PLAYERS_CLUB_OCG_PRODUCTS_URL = "https://playersclubhk.com/en/collections/ocg/products.json?limit=250&page=";
+const PLAYERS_CLUB_CACHE_KEY = "ygoPlayersClubProducts";
+const PLAYERS_CLUB_CACHE_TTL = 24 * 60 * 60 * 1000;
+const MAX_PLAYERS_CLUB_PAGES = 24;
 let bakedTCGPriceCatalogPromise = null;
 let bakedPlayersClubPriceCatalogPromise = null;
+let playersClubRefreshPromise = null;
 
 const TCGC_RAR = {
   C: "C",
@@ -463,6 +478,7 @@ function saveData() {
   localStorage.setItem("ygoDecks", JSON.stringify(decks));
   localStorage.setItem("ygoDeckCards", JSON.stringify(deckCards));
   localStorage.setItem("ygoDeckCardOrder", JSON.stringify(deckCardOrder));
+  getStoredCardImage.index = null;
 }
 function showPage(page) {
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
@@ -2341,7 +2357,7 @@ function renderCards() {
 
   const groups = new Map();
   cards.forEach(card => {
-    const groupKey = `${card.sourceLanguage}|${card.cardCode || card.productId}`;
+    const groupKey = getCardCatalogGroupKey(card);
     if (!groups.has(groupKey)) groups.set(groupKey, []);
     groups.get(groupKey).push(card);
   });
@@ -2356,6 +2372,17 @@ function renderCards() {
 
   grid.innerHTML = filteredGroups.map(variants => {
     const card = variants[0];
+    const cardImage = card.image || getCardImageUrl(card) ||
+      getStoredCardImage(card.name) || variants.find(variant => variant.image)?.image || "";
+    const textSource = variants.find(variant =>
+      String(variant.cardText || variant.desc || "").trim()
+    ) || localCardDatabase.find(localCard =>
+      String(localCard.name || "").trim().toLowerCase() ===
+      String(card.name || "").trim().toLowerCase()
+    );
+    const tooltipCard = textSource && !card.cardText
+      ? { ...card, cardText: textSource.cardText || textSource.desc || "" }
+      : card;
     const sourceGroups = new Map();
     variants.forEach(variant => {
       const sourceName = variant.sourceName || "TCG Corner";
@@ -2390,12 +2417,12 @@ function renderCards() {
     return `<div class="card card-item">
       <div class="card-image">
       ${
-          card.image
+          cardImage
             ? `
                 <img
-                  src="${escapeHtml(card.image)}"
+                  src="${escapeHtml(cardImage)}"
                   alt="${escapeHtml(card.name)}"
-                  ${cardTooltipAttributes(card, card.rarity)}
+                  ${cardTooltipAttributes(tooltipCard, card.rarity)}
                   style="width:100%;height:100%;object-fit:contain;"
                 >
               `
@@ -2426,6 +2453,12 @@ function updateCardSource(select) {
 
   if (priceElement) priceElement.textContent = money(selectedCard.price);
   if (purchaseButton) purchaseButton.dataset.cardId = selectedCard.id;
+}
+
+function getCardCatalogGroupKey(card) {
+  const code = String(card?.cardCode || "").trim().toLowerCase();
+  if (code) return `code|${code}`;
+  return `name|${String(card?.name || card?.productId || "").trim().toLowerCase()}`;
 }
 
 function updateCardRarity(select) {
@@ -2466,50 +2499,62 @@ function openPurchaseFor(id) {
 }
 
 async function loadCollectionProducts(feed) {
+  const pages = new Array(MAX_TCG_FEED_PAGES);
+  let nextPage = 1;
+  const worker = async () => {
+    while (nextPage <= MAX_TCG_FEED_PAGES) {
+      const page = nextPage++;
+      let response;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        try {
+          response = await fetch(`${feed.url}&page=${page}&_=${Date.now()}`, {
+            headers: { "Accept": "application/json" },
+            cache: "no-store",
+            signal: controller.signal
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
+        if (response.status !== 429 || attempt === 1) break;
+        const retryAfter = Number(response.headers.get("Retry-After")) || 1;
+        await new Promise(resolve => setTimeout(resolve, Math.min(retryAfter * 1000, 5000)));
+      }
+      if (!response?.ok) {
+        if (page === 1) throw new Error(`TCG Corner returned HTTP ${response?.status || "a network error"} for the ${feed.language} collection.`);
+        continue;
+      }
+      const data = await response.json();
+      pages[page - 1] = Array.isArray(data.products) ? data.products : [];
+    }
+  };
+
+  await Promise.all(Array.from({ length: 4 }, worker));
   const products = [];
   const seen = new Set();
-
-  for (let page = 1; page <= MAX_TCG_FEED_PAGES; page++) {
-    let response;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        response = await fetch(`${feed.url}&page=${page}`, {
-          headers: { "Accept": "application/json" }
-        });
-      } catch (error) {
-        if (page === 1) throw error;
-        break;
+  for (const pageProducts of pages) {
+    if (!pageProducts?.length) break;
+    pageProducts.forEach(product => {
+      if (!seen.has(String(product.id))) {
+        seen.add(String(product.id));
+        products.push(product);
       }
-
-      if (response.status !== 429 || attempt === 2) break;
-
-      const retryAfter = Number(response.headers.get("Retry-After")) || 2;
-      await new Promise(resolve => setTimeout(resolve, Math.min(retryAfter * 1000, 10000)));
-    }
-    if (!response) break;
-    if (response.status === 429 && page > 1) break;
-    if (!response.ok) throw new Error(`TCG Corner returned HTTP ${response.status} for the ${feed.language} collection.`);
-
-    const data = await response.json();
-    const pageProducts = Array.isArray(data.products) ? data.products : [];
-    const newProducts = pageProducts.filter(product => !seen.has(String(product.id)));
-    newProducts.forEach(product => seen.add(String(product.id)));
-    products.push(...newProducts);
-
-    if (pageProducts.length < 250 || newProducts.length === 0) break;
+    });
+    if (pageProducts.length < 250) break;
   }
-
   return products.map(product => ({ ...product, sourceLanguage: feed.language }));
 }
 
-async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) {
-  tcgLoading = true;
+async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false, japaneseOnly = false) {
+  const hadCatalog = cards.length > 0;
+  tcgLoading = !hadCatalog;
   tcgError = "";
-  renderCards();
+  if (!hadCatalog) renderCards();
 
   if (!forceRefresh) {
     const bakedProducts = await loadBakedTCGPriceCatalog();
-    const playersClubProducts = await loadBakedPlayersClubPriceCatalog();
+    const playersClubProducts = await loadPlayersClubProducts(false);
     const cachedProducts = bakedProducts ? null : getCachedTCGProducts();
     const tcgProducts = bakedProducts || cachedProducts;
     if (tcgProducts || playersClubProducts) {
@@ -2517,6 +2562,9 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
         [...(tcgProducts || []), ...(playersClubProducts || [])],
         false
       );
+      if (isPlayersClubCacheStale()) void refreshPlayersClubProducts(true);
+      if (!bakedProducts && isTCGCacheStale()) void loadTCGProducts(true, true);
+      if (bakedProducts) void loadTCGProducts(true, true, true);
       return;
     }
   }
@@ -2532,8 +2580,15 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
 
   try {
     let products;
+    let playersClubProducts;
+    const bakedTCGProducts = await loadBakedTCGPriceCatalog();
     try {
-      products = (await Promise.all(TCG_FEEDS.map(loadCollectionProducts))).flat();
+      [products, playersClubProducts] = await Promise.all([
+        Promise.all((japaneseOnly
+          ? TCG_FEEDS.filter(feed => feed.language === "Japanese")
+          : TCG_FEEDS).map(loadCollectionProducts)).then(items => items.flat()),
+        refreshPlayersClubProducts(false)
+      ]);
     } catch (collectionError) {
       const response = await fetch(TCG_GLOBAL_FEED, { headers: { "Accept": "application/json" } });
       if (!response.ok) throw collectionError;
@@ -2542,6 +2597,7 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
         ...product,
         sourceLanguage: ""
       }));
+      playersClubProducts = await loadPlayersClubProducts(false) || [];
     }
 
     // The feed contains multiple TCGs and product types. For this prototype,
@@ -2566,7 +2622,10 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
 
       const image = product.images?.[0]?.src || "";
 
-      return variants.filter(variant => isAllowedLanguage(product, variant)).map(variant => ({
+      return variants.filter(variant => {
+        const listingText = [product.title, variant.title || "", product.body_html || ""].join(" ");
+        return isAllowedLanguage(product, variant) && !/\(\s*Status\s*[A-Za-z]\s*\)/i.test(listingText);
+      }).map(variant => ({
         id: String(variant.id),
         productId: product.id,
         cardCode: getCardCode(product.title),
@@ -2580,24 +2639,34 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
         ].join(" ")),
         cardText: getCardText(product.body_html || ""),
         price: Number(variant.price || 0),
+        storePrice: Number(variant.price || 0),
+        storeCurrency: product.sourceLanguage === "Japanese" ? "PHP" : "USD",
+        sourceName: "TCG Corner",
         available: Boolean(variant.available),
         image,
+        sourceLanguage: product.sourceLanguage,
         tags: Array.isArray(product.tags) ? product.tags.join(" ") : "",
         url: product.handle ? `https://tcg-corner.com/products/${product.handle}` : ""
       }));
     });
     const previousCards = getCachedTCGProducts();
-    if (previousCards && previousCards.length >= 100 &&
+    let completeTCGCards = nextCards;
+    if (!japaneseOnly && previousCards && previousCards.length >= 100 &&
         nextCards.length < previousCards.length * 0.85) {
       console.warn(
-        `Sync returned only ${nextCards.length} cards; using the partial catalog instead of failing.`
+        `Sync returned only ${nextCards.length} cards; keeping the previous complete catalog.`
       );
+      completeTCGCards = previousCards;
     }
 
-    finishTCGProductLoad(nextCards);
+    finishTCGProductLoad([
+      ...(bakedTCGProducts || []),
+      ...(completeTCGCards || []),
+      ...(playersClubProducts || [])
+    ]);
   } catch (error) {
     const bakedProducts = await loadBakedTCGPriceCatalog();
-    const playersClubProducts = await loadBakedPlayersClubPriceCatalog();
+    const playersClubProducts = await loadPlayersClubProducts(false);
     if (bakedProducts || playersClubProducts) {
       finishTCGProductLoad(
         [...(bakedProducts || []), ...(playersClubProducts || [])],
@@ -2611,6 +2680,167 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false) 
     if (backgroundRefresh) console.warn("Background TCG Corner refresh failed:", error);
     renderCards();
   }
+}
+
+function getPlayersClubRarity(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  const rarityMap = {
+    UTR: "UtR",
+    SER: "ScR",
+    PSER: "PScR",
+    QCSE: "QCSR",
+    SR: "SR",
+    UR: "UR",
+    R: "R",
+    C: "C",
+    CR: "CR",
+    ESR: "ExSR",
+    ESER: "ExSR",
+    ESE: "ExSR",
+    EXSER: "ExSR",
+    OSER: "OSER"
+  };
+  return rarityMap[normalized] || (normalized ? "" : "C");
+}
+
+function parsePlayersClubTitle(rawTitle, region = "AE") {
+  const codeRegion = region === "OCG" ? "JP" : "AE";
+  const match = String(rawTitle || "").match(new RegExp(`^\\s*([A-Z0-9]{2,8}-${codeRegion}[A-Z0-9]{2,4})\\s*(.*)$`, "i"));
+  if (!match) return null;
+
+  const code = match[1].toUpperCase();
+  const unsupportedRarity = /\(\s*(?:[A-Z]{1,5}\s*\/\s*)+[A-Z]{1,5}\s*\)|\(\s*(?:NPR|AA)\s*\)/i;
+  if (unsupportedRarity.test(match[2])) return null;
+  const rarityMatch = match[2].match(/\(\s*(UTR|SER|PSER|QCSE|SR|UR|R|C)\s*\)/i);
+  const rarity = getPlayersClubRarity(rarityMatch?.[1]);
+  const name = match[2].replace(/\(\s*(?:UTR|SER|PSER|QCSE|SR|UR|R|C)\s*\)/ig, "")
+    .replace(/\s+/g, " ").trim();
+
+  return { code, name, rarity };
+}
+
+async function loadLivePlayersClubProducts(feed) {
+  const products = [];
+  const seen = new Set();
+
+  for (let page = 1; page <= MAX_PLAYERS_CLUB_PAGES; page++) {
+    const response = await fetch(`${feed.url}${page}&_=${Date.now()}`, {
+      headers: { "Accept": "application/json" },
+      cache: "no-store"
+    });
+    if (!response.ok) throw new Error(`Players Club ${feed.region} returned HTTP ${response.status}.`);
+
+    const data = await response.json();
+    const pageProducts = Array.isArray(data.products) ? data.products : [];
+    const newProducts = pageProducts.filter(product => !seen.has(String(product.id)));
+    newProducts.forEach(product => seen.add(String(product.id)));
+    products.push(...newProducts);
+    if (pageProducts.length < 250 || newProducts.length === 0) break;
+  }
+
+  const normalized = products.flatMap((product, index) => {
+    const parsed = parsePlayersClubTitle(product.title, feed.region);
+    if (!parsed) return [];
+    const variants = Array.isArray(product.variants) && product.variants.length
+      ? product.variants
+      : [{ id: `${product.id}-default`, title: "Default Title", price: "0", available: false }];
+
+    return variants.flatMap(variant => {
+      const variantTitle = String(variant.title || "").trim();
+      const isBaseVariant = !variantTitle || /^default title$/i.test(variantTitle);
+      const hasMultipleRarities = /\b[A-Z]{1,5}\s*\/\s*[A-Z]{1,5}\b/i.test(variantTitle);
+      const rarity = isBaseVariant ? parsed.rarity : getPlayersClubRarity(variantTitle);
+      const price = Number(variant.price);
+      if (hasMultipleRarities || !rarity || !Number.isFinite(price) || price <= 0) return [];
+
+      return [{
+        id: `playersclub-live-${product.id}-${variant.id || index}`,
+        productId: `playersclub-live-${product.id}`,
+        sourceName: "Players Club",
+        sourceLanguage: feed.region === "OCG" ? "Japanese" : "Asian English",
+        cardCode: parsed.code,
+        name: parsed.name || parsed.code,
+        variantTitle: rarity,
+        rarity,
+        storePrice: price,
+        storeCurrency: "HKD",
+        available: variant.available !== false,
+        image: product.images?.[0]?.src || "",
+        tags: `${feed.region} Players Club`,
+        url: product.handle ? `https://playersclubhk.com/en/products/${product.handle}` : ""
+      }];
+    });
+  }).filter(Boolean);
+
+  return normalized;
+}
+
+function getCachedPlayersClubProducts() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(PLAYERS_CLUB_CACHE_KEY) || "null");
+    return Array.isArray(cached?.cards) && cached.cards.length ? cached.cards : null;
+  } catch (error) {
+    console.warn("Unable to read Players Club cache:", error);
+    return null;
+  }
+}
+
+function isPlayersClubCacheStale() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(PLAYERS_CLUB_CACHE_KEY) || "null");
+    if (!Array.isArray(cached?.cards) || !cached.cards.some(card => card.sourceLanguage === "Japanese")) {
+      return true;
+    }
+    return !cached?.savedAt || Date.now() - Date.parse(cached.savedAt) >= PLAYERS_CLUB_CACHE_TTL;
+  } catch (error) {
+    return true;
+  }
+}
+
+async function refreshPlayersClubProducts(backgroundRefresh = false) {
+  if (playersClubRefreshPromise) return playersClubRefreshPromise;
+  const feeds = [
+    { url: PLAYERS_CLUB_PRODUCTS_URL, region: "AE" },
+    { url: PLAYERS_CLUB_OCG_PRODUCTS_URL, region: "OCG" }
+  ];
+  playersClubRefreshPromise = Promise.allSettled(feeds.map(loadLivePlayersClubProducts))
+    .then(results => {
+      const products = results
+        .filter(result => result.status === "fulfilled")
+        .flatMap(result => result.value);
+      if (!products.length) {
+        const failure = results.find(result => result.status === "rejected");
+        throw failure?.reason || new Error("Players Club returned no usable listings.");
+      }
+      return products;
+    })
+    .then(products => {
+      localStorage.setItem(PLAYERS_CLUB_CACHE_KEY, JSON.stringify({
+        savedAt: new Date().toISOString(),
+        cards: products
+      }));
+      return products;
+    })
+    .then(products => {
+      if (backgroundRefresh && Array.isArray(products)) {
+        const currentTCGProducts = cards.filter(card => card.sourceName !== "Players Club");
+        finishTCGProductLoad([...currentTCGProducts, ...products], false);
+      }
+      return products;
+    })
+    .catch(error => {
+      if (!backgroundRefresh) console.warn("Live Players Club sync failed:", error);
+      return getCachedPlayersClubProducts() || loadBakedPlayersClubPriceCatalog();
+    })
+    .finally(() => { playersClubRefreshPromise = null; });
+  return playersClubRefreshPromise;
+}
+
+async function loadPlayersClubProducts(forceRefresh = false) {
+  if (forceRefresh) return refreshPlayersClubProducts(false);
+  const cached = getCachedPlayersClubProducts();
+  if (cached) return cached;
+  return loadBakedPlayersClubPriceCatalog();
 }
 
 async function loadBakedPlayersClubPriceCatalog() {
@@ -2641,10 +2871,12 @@ async function loadBakedPlayersClubPriceCatalog() {
 
       return data.rows.map((row, index) => {
         const code = String(row[0] || "").toUpperCase();
+        const parsed = parsePlayersClubTitle(`${code} ${row[2] || ""}`);
         const card = cardsByCode.get(code) ||
-          cardsByName.get(String(row[2] || "").trim().toLowerCase());
+          cardsByName.get(String(parsed?.name || row[2] || "").trim().toLowerCase());
         const price = Number(row[1]);
-        if (!code || !row[2] || !Number.isFinite(price)) return null;
+        if (!code || !row[2] || !parsed || !Number.isFinite(price)) return null;
+        const displayName = parsed.name || card?.name || code;
 
         return {
           id: `playersclub-baked-${index}-${code}`,
@@ -2652,9 +2884,9 @@ async function loadBakedPlayersClubPriceCatalog() {
           sourceName: "Players Club",
           sourceLanguage: "Asian English",
           cardCode: code,
-          name: String(row[2]),
-          variantTitle: String(row[3] || "Default"),
-          rarity: String(row[3] || "Other"),
+          name: displayName,
+          variantTitle: parsed.rarity,
+          rarity: parsed.rarity,
           cardText: card?.cardText || card?.desc || "",
           storePrice: price,
           storeCurrency: "HKD",
@@ -2685,7 +2917,10 @@ function getCachedTCGProducts() {
           ...card,
           sourceName: card.sourceName || "TCG Corner",
           tags: card.tags || "",
-          cardText: card.cardText || ""
+          cardText: card.cardText || "",
+          price: card.storeCurrency
+            ? convertStorePrice(card.storePrice ?? card.price, card.storeCurrency)
+            : Number(card.price || 0)
         }))
       : null;
 
@@ -2719,7 +2954,8 @@ async function loadBakedTCGPriceCatalog() {
         const code = String(row[0] || "").toUpperCase();
         const card = cardsByCode.get(code);
         const price = Number(row[1]);
-        if (!code || !row[2] || !Number.isFinite(price)) return null;
+        const condition = String(row[4] || "").trim();
+        if (!code || !row[2] || !Number.isFinite(price) || condition) return null;
 
         return {
           id: `baked-${index}-${code}`,
@@ -2729,7 +2965,8 @@ async function loadBakedTCGPriceCatalog() {
           variantTitle: String(row[3] || "Default"),
           rarity: String(row[3] || "Other"),
           cardText: card?.cardText || card?.desc || "",
-          price,
+          storePrice: price,
+          storeCurrency: data.currency || "USD",
           available: Boolean(row[5]),
           image: card?.image || "",
           tags: "Asian English TCG Corner",
@@ -2768,6 +3005,8 @@ function cacheTCGProducts(products) {
       variantTitle: product.variantTitle,
       rarity: product.rarity,
       price: product.price,
+      storePrice: product.storePrice,
+      storeCurrency: product.storeCurrency,
       available: product.available,
       image: product.image,
       tags: product.tags || "",
@@ -2806,13 +3045,44 @@ function cacheTCGProducts(products) {
 }
 
 function finishTCGProductLoad(products, shouldCache = true) {
-  cards = products.map(card => ({
+  const bakedTCGCards = products.filter(card =>
+    (card.sourceName || "TCG Corner") === "TCG Corner" &&
+    String(card.id || "").startsWith("baked-")
+  );
+  if (bakedTCGCards.length > 100) {
+    const liveTCGCards = products.filter(card =>
+      (card.sourceName || "TCG Corner") === "TCG Corner" &&
+      !String(card.id || "").startsWith("baked-") &&
+      card.sourceLanguage !== "Japanese"
+    );
+    const liveByPrinting = new Map(liveTCGCards.map(card => [
+      `${String(card.cardCode || "").toLowerCase()}|${String(card.rarity || "").toLowerCase()}`,
+      card
+    ]));
+    const mergedTCGCards = bakedTCGCards.map(bakedCard => {
+      const liveCard = liveByPrinting.get(
+        `${String(bakedCard.cardCode || "").toLowerCase()}|${String(bakedCard.rarity || "").toLowerCase()}`
+      );
+      return liveCard
+        ? { ...bakedCard, ...liveCard, image: liveCard.image || bakedCard.image }
+        : bakedCard;
+    });
+    const playersClubCards = products.filter(card => card.sourceName === "Players Club");
+    const japaneseCards = products.filter(card => card.sourceLanguage === "Japanese");
+    products = [...mergedTCGCards, ...playersClubCards, ...japaneseCards];
+  }
+
+  cards = products.map(card => {
+    const storedImage = getStoredCardImage(card.name);
+    return {
     ...card,
     sourceName: card.sourceName || "TCG Corner",
+    image: card.image || storedImage || "",
     price: card.storeCurrency
       ? convertStorePrice(card.storePrice ?? card.price, card.storeCurrency)
       : Number(card.price || 0)
-  }));
+    };
+  });
 
   if (shouldCache) {
     cacheTCGProducts(cards);
@@ -2838,15 +3108,17 @@ async function syncTCGCorner() {
   const button = document.getElementById("syncTCGButton");
   if (button) {
     button.disabled = true;
-    button.textContent = "Syncing...";
+    button.textContent = "Sync started";
   }
 
-  await loadTCGProducts(true);
-
-  if (button) {
-    button.disabled = false;
-    button.textContent = tcgError ? "Retry Sync" : "Sync TCG Corner";
-  }
+  const refresh = loadTCGProducts(true, true);
+  const handoff = new Promise(resolve => setTimeout(resolve, 1200));
+  void Promise.race([refresh, handoff]).finally(() => {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Sync TCG Corner";
+    }
+  });
 }
 
 function populatePurchaseSelector() {
@@ -3251,6 +3523,31 @@ function addMarketplaceListing(card, quantity, price, set, rarity) {
   renderMarketplaceListings();
 }
 
+function getMarketplaceImage(card, listingImage = "") {
+  if (listingImage) return listingImage;
+  return getCardImageUrl(card) || getStoredCardImage(card?.name) || "";
+}
+
+function getStoredCardImage(cardName) {
+  const nameKey = String(cardName || "").trim().toLowerCase();
+  if (!nameKey) return "";
+
+  if (!getStoredCardImage.index) {
+    const index = new Map();
+    marketplaceListings.forEach(item => {
+      const key = String(item.card || "").trim().toLowerCase();
+      if (key && item.image && !index.has(key)) index.set(key, item.image);
+    });
+    Object.values(deckCards || {}).flat().forEach(item => {
+      const key = String(item.card || "").trim().toLowerCase();
+      if (key && item.image && !index.has(key)) index.set(key, item.image);
+    });
+    getStoredCardImage.index = index;
+  }
+
+  return getStoredCardImage.index.get(nameKey) || "";
+}
+
 function renderMarketplaceListings() {
   const container = document.getElementById("marketplaceListings");
   if (!container) return;
@@ -3261,14 +3558,15 @@ function renderMarketplaceListings() {
 
     if (!card) return "";
     
-    const image = getCardImageUrl(card);
+    const image = getMarketplaceImage(card, listing.image);
     const quantity = Number(listing.quantity ?? listing.qty ?? 1);
     const price = Number(listing.price || 0);
 
     return `
       <article class="card marketplace-listing">
-        <img src="${escapeHtml(image)}"
-             alt="${escapeHtml(card.name)}" ${cardTooltipAttributes(card, listing.rarity)}>
+        ${image
+          ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(card.name)}" ${cardTooltipAttributes(card, listing.rarity)}>`
+          : `<div class="card-image">No image</div>`}
 
         <div class="card-info">
           <strong>${escapeHtml(card.name)}</strong>
@@ -3396,6 +3694,7 @@ function saveMarketplaceListings() {
     "ygoMarketplaceListings",
     JSON.stringify(marketplaceListings)
   );
+  getStoredCardImage.index = null;
 }
 
 function saveMarketplaceListing() {
@@ -3429,6 +3728,7 @@ function saveMarketplaceListing() {
     id: crypto.randomUUID(),
     cardId: String(card.id),
     card: card.name,
+    image: getMarketplaceImage(card),
     set: document.getElementById("marketplaceSet").selectedOptions[0]?.dataset.set || "",
     region: document.getElementById("marketplaceSet").selectedOptions[0]?.dataset.region || "TCG",
     rarity: document.getElementById("marketplaceRarity").value,
@@ -3696,12 +3996,13 @@ function renderMarketplaceCards() {
   });
 
   grid.innerHTML = results.map(card => {
-    const image = getCardImageUrl(card);
+    const image = getMarketplaceImage(card);
 
     return `
       <article class="card marketplace-card">
-        <img loading="lazy" decoding="async" src="${escapeHtml(image)}"
-             alt="${escapeHtml(card.name || "")}">
+        ${image
+          ? `<img loading="lazy" decoding="async" src="${escapeHtml(image)}" alt="${escapeHtml(card.name || "")}" >`
+          : `<div class="card-image">No image</div>`}
 
         <h3>${escapeHtml(card.name || "Unknown card")}</h3>
 
