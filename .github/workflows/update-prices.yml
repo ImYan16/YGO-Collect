@@ -23,12 +23,15 @@ jobs:
 
       - name: Harvest Players Club prices
         run: perl Tools/pl-prices-playersclub.pl
-
+      
+      - name: Harvest Players Club OCG prices
+        run: perl Tools/pl-prices-playersclub-ocg.pl
+      
       - name: Commit updated price data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tcgc-prices.json playersclub-prices.json
+          git add tcgc-prices.json playersclub-prices.json playersclub-prices-ocg.json
           if [ -f Tools/played-stock.json ]; then git add Tools/played-stock.json; fi
           if git diff --cached --quiet; then
             echo "No price changes to commit"
