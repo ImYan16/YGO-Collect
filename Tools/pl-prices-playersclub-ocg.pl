@@ -13,7 +13,7 @@ binmode(STDOUT, ':encoding(UTF-8)');
 my $UA = 'Mozilla/5.0 (compatible; YGO-Collect price harvester)';
 my $COLLECTION = 'ocg';
 my $BASE = "https://playersclubhk.com/en/collections/$COLLECTION/products.json";
-my $OUT = 'playersclub-ocg-prices.json';
+my $OUT = 'playersclub-prices-ocg.json';
 my $MAX_PAGES = 60;
 my $PAGE_SIZE = 250;
 
