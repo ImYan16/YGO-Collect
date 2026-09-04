@@ -2,7 +2,7 @@ const VERSION = "ygo-collect-v1";
 const SHELL_CACHE = `${VERSION}-shell`;
 const DATA_CACHE = `${VERSION}-data`;
 const IMAGE_CACHE = `${VERSION}-images`;
-const SHELL_FILES = ["./", "./ygocollect.html", "./data/tcg.json", "./data/ae.json", "./data/ocg.json", "./data/banlists.json"];
+const SHELL_FILES = ["./", "./index.html", "./data/tcg.json", "./data/ae.json", "./data/ocg.json"];
 
 self.addEventListener("install", event => {
   event.waitUntil(
