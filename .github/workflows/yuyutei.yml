@@ -1,46 +1,45 @@
-name: Run YuYuTei Scraper
+name: YuYuTei Scraper
 
 on:
   workflow_dispatch:
   schedule:
     - cron: "0 */6 * * *"
 
+permissions:
+  contents: write
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Perl
+      - name: Setup Perl
         uses: shogo82148/actions-setup-perl@v1
         with:
           perl-version: "5.40"
 
-      - name: Install Perl dependencies
+      - name: Install dependencies
         run: |
           cpanm --notest LWP::UserAgent
-          cpanm --notest HTTP::Request
-          cpanm --notest JSON
-          cpanm --notest HTML::TreeBuilder
           cpanm --notest URI
-          cpanm --notest Encode
 
       - name: Run YuYuTei scraper
         run: |
           perl Tools/yuyutei.pl
 
-      - name: Commit updated data
+      - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add .
+          git add Tools/yuyutei.json
 
           if git diff --cached --quiet; then
-            echo "No changes to commit."
+            echo "No changes detected."
           else
-            git commit -m "Update YuYuTei card data"
+            git commit -m "Update YuYuTei data"
             git push
           fi
