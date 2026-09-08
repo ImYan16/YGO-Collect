@@ -15,8 +15,6 @@ use Time::HiRes qw(sleep);
 # Single URL:
 #   perl scrape_yuyutei.pl https://yuyu-tei.jp/sell/ygo/card/prb/10524
 #
-# URL list:
-#   perl scrape_yuyutei.pl yuyutei_urls.txt
 #
 # Output:
 #   yuyutei.json
