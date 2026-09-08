@@ -23,8 +23,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          cpanm --notest LWP::UserAgent
-          cpanm --notest URI
+          cpanm --notest LWP::UserAgent LWP::Protocol::https URI
 
       - name: Check Perl syntax
         run: |
@@ -38,7 +37,6 @@ jobs:
       - name: Check output
         run: |
           test -s Tools/yuyutei.json
-          echo "YuYuTei JSON created successfully"
 
       - name: Commit updated data
         run: |
