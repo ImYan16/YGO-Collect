@@ -26,11 +26,21 @@ jobs:
           cpanm --notest LWP::UserAgent
           cpanm --notest URI
 
-      - name: Run YuYuTei scraper
+      - name: Check Perl syntax
         run: |
-          perl Tools/yuyutei.pl
+          perl -c Tools/yuyutei.pl
 
-      - name: Commit changes
+      - name: Run YuYuTei scraper
+        working-directory: Tools
+        run: |
+          perl yuyutei.pl
+
+      - name: Check output
+        run: |
+          test -s Tools/yuyutei.json
+          echo "YuYuTei JSON created successfully"
+
+      - name: Commit updated data
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
