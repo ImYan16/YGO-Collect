@@ -1,10 +1,10 @@
 let userCurrency = "PHP";
 let exchangeRates = { USD: 1, HKD: 7.8, PHP: 58 };
 const EXCHANGE_RATE_CACHE_KEY = "ygoUsdExchangeRates";
-let localCardDatabase = [];
-let localCardDatabaseReady = false;
-let localCardDatabasePromise = null;
-let banlists = {
+ let localCardDatabase = [];
+ let localCardDatabaseReady = false;
+ let localCardDatabasePromise = null;
+ let banlists = {
   TCG: {},
   AE: {},
   OCG: {}
@@ -658,7 +658,7 @@ function renderDecks() {
 
     const modal = document.createElement("div");
     modal.id = "deleteDeckModal";
-    modal.className = "delete-deck";
+    modal.className = "delete-deck-modal";
 
     modal.innerHTML = `
         <div class="delete-deck-overlay"></div>
@@ -1256,7 +1256,7 @@ async function showCardDetails(card) {
     }
   }
 
-  setSelect?.addEventListener("change", updateRarityOptions);
+  if (setSelect) {setSelect.onchange = updateRarityOptions;}
   updateRarityOptions();
 
   document.getElementById("detailCardName").textContent =
@@ -1649,42 +1649,6 @@ function getCardCountInDeck(deckName, cardId) {
 }
 
 
-function getCardLimit(cardName) {
-  const requested = String(activeBanlist || "TCG")
-    .trim()
-    .toUpperCase();
-
-  const aliases = {
-    TCG: ["TCG", "EN", "ENGLISH"],
-    AE: ["AE", "ASIAN_ENGLISH", "ASIAN ENGLISH", "ASIAN-ENGLISH"],
-    OCG: ["OCG", "JP", "JAPANESE"]
-  };
-
-  const possibleKeys = aliases[requested] || [requested];
-
-  const banlist = possibleKeys
-    .map(key => banlists?.[key])
-    .find(value => value && typeof value === "object");
-
-  if (!banlist) {
-    console.warn(
-      "Banlist not found:",
-      requested,
-      "Available:",
-      Object.keys(banlists || {})
-    );
-
-    return 3;
-  }
-
-  const entry = banlist[String(cardName || "").trim().toLowerCase()];
-
-  if (entry === undefined || entry === null) return 3;
-
-  if (typeof entry === "number") return entry;
-
-  return Number(entry.limit ?? entry.status ?? 3);
-}
 
 function addCardEntryToDeck(
   deckName,
@@ -1726,7 +1690,10 @@ function addCardEntryToDeck(
   }
 
   const purchaseRegion = selectedRegion || getPrintingRegion(card.cardCode);
-  const purchaseSet = selectedSet || getSetCode(card.cardCode);
+  const purchaseSet =
+    selectedSet.includes("|")
+      ? selectedSet.split("|")[1]
+      : selectedSet || getSetCode(card.cardCode);
   const printing =
     printings.find(item =>
       item.region === purchaseRegion &&
@@ -2517,7 +2484,7 @@ async function loadCollectionProducts(feed) {
         } finally {
           clearTimeout(timeout);
         }
-        if (response.status === 429 || [500, 502, 503, 504].includes(response.status)) {   const retryAfter = Number(response.headers.get("Retry-After")) || 2;   await new Promise(resolve =>     setTimeout(resolve, Math.min(retryAfter * 1000, 10000))   ); }
+        if (response.status !== 429 || attempt === 1) break;
         const retryAfter = Number(response.headers.get("Retry-After")) || 1;
         await new Promise(resolve => setTimeout(resolve, Math.min(retryAfter * 1000, 5000)));
       }
@@ -2530,7 +2497,7 @@ async function loadCollectionProducts(feed) {
     }
   };
 
-  await worker();
+  await Promise.all(Array.from({ length: 4 }, worker));
   const products = [];
   const seen = new Set();
   for (const pageProducts of pages) {
@@ -3111,35 +3078,14 @@ async function syncTCGCorner() {
     button.textContent = "Sync started";
   }
 
-  async function syncTCGCorner() {
-  const button = document.getElementById("syncTCGButton");
-
-  if (button) {
-    button.disabled = true;
-    button.textContent = "Syncing...";
-  }
-
-  try {
-    await loadTCGProducts(true, false);
-
+  const refresh = loadTCGProducts(true, true);
+  const handoff = new Promise(resolve => setTimeout(resolve, 1200));
+  void Promise.race([refresh, handoff]).finally(() => {
     if (button) {
-      button.textContent = "Sync Complete";
+      button.disabled = false;
+      button.textContent = "Sync TCG Corner";
     }
-  } catch (error) {
-    console.error("TCG Corner sync failed:", error);
-
-    if (button) {
-      button.textContent = "Sync Failed";
-    }
-  } finally {
-    setTimeout(() => {
-      if (button) {
-        button.disabled = false;
-        button.textContent = "Sync TCG Corner";
-      }
-    }, 1500);
-  }
-}
+  });
 }
 
 window.syncTCGCorner = syncTCGCorner;
@@ -3225,32 +3171,6 @@ function normalizeBanlists(data) {
   };
 }
 
-async function loadBanlists() {
-  try {
-    const response = await fetch("./data/banlists.json");
-
-    if (!response.ok) {
-      throw new Error(`Banlist HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    banlists = {
-      TCG: normalizeBanlistSection(data.TCG),
-      AE: normalizeBanlistSection(data.AE),
-      OCG: normalizeBanlistSection(data.OCG)
-    };
-
-    console.log("Loaded banlists:", {
-      TCG: Object.keys(banlists.TCG).length,
-      AE: Object.keys(banlists.AE).length,
-      OCG: Object.keys(banlists.OCG).length
-    });
-  } catch (error) {
-    console.error("Banlist loading failed:", error);
-    banlists = { TCG: {}, AE: {}, OCG: {} };
-  }
-}
 
 
 function setActiveBanlist(value) {
@@ -3952,14 +3872,10 @@ document
     const setSelect = document.getElementById("detailCardSetSelect");
     const raritySelect = document.getElementById("detailCardRaritySelect");
     const quantity = Number(
-      document.getElementById("detailCardQuantity").value
-    ) || 1;
-
-    const selectedOption =
-      setSelect.options[setSelect.selectedIndex];
-
+      document.getElementById("detailCardQuantity").value) || 1;
+    const selectedOption = setSelect.options[setSelect.selectedIndex];
     const region = selectedOption?.dataset.region || "TCG";
-    const selectedSet = setSelect.value;
+    const selectedSet = selectedOption?.dataset.set || "";
     const selectedRarity = raritySelect.value;
 
     const printing = getCardPrintings(detailSelectedCard).find(item =>
@@ -4104,9 +4020,14 @@ document.body.dataset.theme = savedTheme;
 const themeToggle = document.getElementById("theme");
 if (themeToggle) {
   themeToggle.checked = savedTheme === "dark";
+  document.documentElement.dataset.theme = savedTheme;
+  document.body.dataset.theme = savedTheme;
   themeToggle.addEventListener("change", () => {
-    const nextTheme = themeToggle.checked ? "dark" : "light";
-    document.body.dataset.theme = nextTheme;
-    localStorage.setItem("ygoTheme", nextTheme);
+  const nextTheme = themeToggle.checked ? "dark" : "light";
+
+  document.body.dataset.theme = nextTheme;
+  document.documentElement.dataset.theme = nextTheme;
+
+  localStorage.setItem("ygoTheme", nextTheme);
   });
 }
