@@ -1,4 +1,4 @@
-    :root {
+:root {
     --bg: #0b0e13;
     --panel: #121720;
     --panel2: #171d27;
@@ -1008,6 +1008,787 @@ body[data-theme="light"] .card-hover-tooltip p {
 .theme__toggle:checked ~ .theme__icon { transform:translateX(27px); }
 .theme__toggle:checked ~ .theme__icon .theme__icon-part:first-child { box-shadow:-3px 1px 0 2px #f4f6f8 inset; background:transparent; transform:scale(1.6); }
 .theme__toggle:checked ~ .theme__icon .theme__icon-part:not(:first-child) { opacity:0; }
+
+/* =========================================================
+   YGO COLLECT UI REFRESH
+   CoreUI-inspired navigation and dashboard styling
+   ========================================================= */
+
+:root {
+  --sidebar-width: 250px;
+  --sidebar-bg: #10141c;
+  --sidebar-border: #252c38;
+  --nav-text: #8f99aa;
+  --nav-active: #ffffff;
+  --nav-active-bg: #242b39;
+  --nav-hover-bg: #1a202b;
+  --icon-size: 19px;
+  --radius-lg: 12px;
+  --radius-md: 9px;
+}
+
+/* ---------- APP SHELL ---------- */
+
+.app {
+  min-height: 100vh;
+}
+
+aside {
+  width: var(--sidebar-width);
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
+  padding: 18px 12px 14px;
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  box-shadow: 4px 0 20px rgba(0, 0, 0, .08);
+}
+
+/* ---------- LOGO ---------- */
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  height: 46px;
+  margin: 0 8px 26px;
+  font-size: initial;
+}
+
+.logo-mark {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+    border-radius: 10px;
+}
+
+.logo-mark img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+}
+
+.logo-text {
+    display: flex;
+    flex-direction: row;
+    align-items: baseline;
+    gap: 5px;
+    line-height: 1;
+}
+
+.logo-text strong {
+    color: #ffff;
+    font-size: 22px;
+    font-weight: 750;
+    letter-spacing: -.02em;
+}
+
+.logo-text span {
+    color: var(--muted);
+    font-size: 22px;
+    font-weight: 500;
+    margin-top: 0;
+}
+
+/* ---------- SIDEBAR LABELS ---------- */
+
+.sidebar-section-label {
+  padding: 0 12px;
+  margin: 2px 0 8px;
+  color: #667185;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .09em;
+}
+
+.sidebar-tools-label {
+  margin-top: 26px;
+}
+
+/* ---------- NAVIGATION ---------- */
+
+aside nav {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+aside nav button {
+  position: relative;
+  width: 100%;
+  min-height: 43px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  margin: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--nav-text);
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+  transition:
+    background .16s ease,
+    color .16s ease,
+    transform .16s ease;
+}
+
+aside nav button svg,
+.sync-nav-button svg {
+  width: var(--icon-size);
+  height: var(--icon-size);
+  flex: 0 0 var(--icon-size);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+aside nav button:hover {
+  color: #d9deea;
+  background: var(--nav-hover-bg);
+}
+
+aside nav button.active {
+  color: var(--nav-active);
+  background: var(--nav-active-bg);
+  font-weight: 600;
+}
+
+aside nav button.active::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 0 4px 4px 0;
+  background: var(--accent);
+}
+
+aside nav button.active svg {
+  color: #a993ff;
+}
+
+/* ---------- SYNC BUTTON ---------- */
+
+.sync-nav-button {
+  width: 100%;
+  min-height: 42px;
+  margin: 0;
+  padding: 10px 12px;
+
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  border: 1px solid #303846;
+  border-radius: var(--radius-md);
+
+  background: #171d27;
+  color: #aeb7c6;
+
+  font-size: 12px;
+  font-weight: 550;
+  text-align: left;
+
+  transition:
+    background .16s ease,
+    border-color .16s ease,
+    color .16s ease;
+}
+
+.sync-nav-button:hover:not(:disabled) {
+  background: #202735;
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.sync-nav-button svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* ---------- SIDEBAR SPACER ---------- */
+
+.sidebar-spacer {
+  flex: 1;
+  min-height: 20px;
+}
+
+/* ---------- THEME SWITCH ---------- */
+
+.theme {
+  width: 100%;
+  margin: 12px 0 0;
+  padding: 10px 8px;
+
+  border-top: 1px solid var(--sidebar-border);
+
+  justify-content: center;
+  gap: 7px;
+
+  color: #788396;
+  font-size: 10px;
+}
+
+/* ---------- MAIN ---------- */
+
+main {
+  margin-left: var(--sidebar-width);
+  width: calc(100% - var(--sidebar-width));
+  padding: 30px 32px 50px;
+}
+
+/* ---------- PAGE HEADERS ---------- */
+
+.topbar {
+  min-height: 48px;
+  margin-bottom: 24px;
+}
+
+.topbar h1 {
+  font-size: 25px;
+  font-weight: 700;
+  letter-spacing: -.025em;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* ---------- DASHBOARD STAT CARDS ---------- */
+
+.stats {
+  gap: 14px;
+}
+
+.stats > .card {
+  position: relative;
+  min-height: 116px;
+  padding: 18px 18px 16px;
+  overflow: hidden;
+}
+
+.stats > .card::after {
+  content: "";
+  position: absolute;
+  right: -24px;
+  bottom: -34px;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: .035;
+}
+
+.stats .label {
+  font-size: 12px;
+  font-weight: 550;
+  letter-spacing: .01em;
+}
+
+.stats .value {
+  margin-top: 12px;
+  font-size: 24px;
+  font-weight: 720;
+  letter-spacing: -.025em;
+}
+
+/* ---------- CARDS ---------- */
+
+.card {
+  border-radius: var(--radius-lg);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, .08);
+  transition:
+    border-color .16s ease,
+    box-shadow .16s ease;
+}
+
+.card:hover {
+  border-color: #333d4d;
+}
+
+/* ---------- SECTION HEADERS ---------- */
+
+.section-head {
+  min-height: 30px;
+}
+
+.section-head h2 {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+
+.pill {
+  background: #202735;
+  border: 1px solid #303848;
+  color: #9ca8ba;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+/* ---------- BUTTONS ---------- */
+
+.btn {
+  min-height: 38px;
+  padding: 8px 13px;
+  border-radius: var(--radius-md);
+  background: var(--panel2);
+  border-color: var(--border);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  transition:
+    background .16s ease,
+    border-color .16s ease,
+    transform .12s ease;
+}
+
+.btn:hover {
+  border-color: #465164;
+  background: #202735;
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px rgba(124, 92, 255, .18);
+}
+
+.btn.primary:hover {
+  background: #896eff;
+  border-color: #896eff;
+}
+
+/* ---------- SEARCH ---------- */
+
+.searchbar {
+  margin-bottom: 16px;
+}
+
+.searchbar input,
+.purchase-search input {
+  min-height: 42px;
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 13px;
+  font-size: 13px;
+  transition:
+    border-color .16s ease,
+    box-shadow .16s ease;
+}
+
+.searchbar input:focus,
+.purchase-search input:focus,
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, .11);
+}
+
+/* ---------- TABLES ---------- */
+
+.table-wrap {
+  border-radius: 9px;
+}
+
+table th {
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: .055em;
+  color: #758095;
+}
+
+table td {
+  font-size: 12px;
+  color: #cbd2de;
+}
+
+table tbody tr {
+  transition: background .12s ease;
+}
+
+table tbody tr:hover {
+  background: rgba(255, 255, 255, .025);
+}
+
+/* ---------- NOTICES ---------- */
+
+.notice {
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* ---------- INPUTS / SELECTS ---------- */
+
+input,
+select {
+  border-radius: var(--radius-md);
+}
+
+select {
+  min-height: 40px;
+}
+
+/* ---------- MODALS ---------- */
+
+.modal-box {
+  border-radius: 14px;
+  border: 1px solid #303847;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .45);
+}
+
+.modal-box h2 {
+  font-size: 19px;
+  letter-spacing: -.02em;
+}
+
+/* ---------- CARD GRID ---------- */
+
+.card-item {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.card-item:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, .3);
+}
+
+/* ---------- MOBILE / COLLAPSED SIDEBAR ---------- */
+
+@media (max-width: 1000px) {
+
+  :root {
+    --sidebar-width: 72px;
+  }
+
+  aside {
+    width: 72px;
+    padding: 18px 8px 12px;
+  }
+
+  .logo {
+    justify-content: center;
+    margin: 0 0 24px;
+  }
+
+  .logo-text,
+  .sidebar-section-label,
+  aside nav button span,
+  .sync-nav-button span,
+  .theme > span:not(.theme__toggle-wrap) {
+    display: none;
+  }
+
+  .logo-mark {
+    width: 36px;
+    height: 36px;
+  }
+
+  aside nav button {
+    justify-content: center;
+    padding: 11px;
+  }
+
+  aside nav button.active::before {
+    left: -8px;
+  }
+
+  .sync-nav-button {
+    justify-content: center;
+    padding: 11px;
+  }
+
+  .theme {
+    border-top: 0;
+  }
+
+  main {
+    margin-left: 72px;
+    width: calc(100% - 72px);
+  }
+}
+
+@media (max-width: 650px) {
+
+  main {
+    padding: 20px 16px 40px;
+  }
+
+  .topbar {
+    margin-bottom: 18px;
+  }
+
+  .topbar h1 {
+    font-size: 22px;
+  }
+
+  .stats {
+    gap: 10px;
+  }
+
+  .stats > .card {
+    min-height: 105px;
+  }
+}
+
+/* ---------- LIGHT THEME ---------- */
+
+body[data-theme="light"] aside {
+  background: #f4f1eb;
+  border-right-color: #ddd7cd;
+}
+
+body[data-theme="light"] .logo-text strong {
+  color: #2b2824;
+}
+
+body[data-theme="light"] aside nav button {
+  color: #777066;
+}
+
+body[data-theme="light"] aside nav button:hover {
+  color: #3d3832;
+  background: #e9e4dc;
+}
+
+body[data-theme="light"] aside nav button.active {
+  color: #2b2824;
+  background: #e4ddd3;
+}
+
+body[data-theme="light"] .sync-nav-button {
+  background: #ebe6de;
+  border-color: #d7d0c5;
+  color: #665f56;
+}
+
+body[data-theme="light"] .sync-nav-button:hover {
+  background: #e3dcd1;
+}
+
+body[data-theme="light"] .card:hover {
+  border-color: #c9c0b4;
+}
+
+body[data-theme="light"] table td {
+  color: #3f3933;
+}
+
+body[data-theme="light"] table tbody tr:hover {
+  background: rgba(80, 60, 40, .035);
+}
+
+/* =========================================================
+   FINAL SIDEBAR ICON ALIGNMENT FIX
+   ========================================================= */
+
+aside nav {
+    width: 100%;
+}
+
+aside nav button {
+    width: 100% !important;
+    height: 43px !important;
+    min-height: 43px !important;
+
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+
+    box-sizing: border-box !important;
+
+    padding: 0 12px !important;
+    margin: 3px 0 !important;
+
+    text-align: left !important;
+    font-size: 13px !important;
+    line-height: 1 !important;
+
+    gap: 12px !important;
+}
+
+/* Every navigation icon gets the exact same box */
+aside nav button svg {
+    width: 20px !important;
+    height: 20px !important;
+
+    min-width: 20px !important;
+    max-width: 20px !important;
+
+    min-height: 20px !important;
+    max-height: 20px !important;
+
+    flex: 0 0 20px !important;
+
+    display: block !important;
+
+    margin: 0 !important;
+    padding: 0 !important;
+
+    box-sizing: border-box !important;
+
+    fill: none !important;
+    stroke: currentColor !important;
+    stroke-width: 1.8 !important;
+    stroke-linecap: round !important;
+    stroke-linejoin: round !important;
+}
+
+/* Keep text aligned consistently */
+aside nav button > span {
+    display: inline-block;
+    line-height: 1;
+}
+
+/* Remove the old marketplace alignment behavior */
+aside nav button[data-page="market"] {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 12px !important;
+    line-height: 1 !important;
+}
+
+/* Remove legacy image/icon rules from affecting navigation */
+aside nav button img {
+    display: none !important;
+}
+
+/* =========================================================
+   COLLAPSED SIDEBAR
+   ========================================================= */
+
+@media (max-width: 1000px) {
+
+    aside {
+        width: 72px !important;
+        padding: 18px 6px 12px !important;
+    }
+
+    aside nav {
+        width: 100%;
+    }
+
+    aside nav button {
+        width: 60px !important;
+        height: 43px !important;
+        min-height: 43px !important;
+
+        margin: 3px auto !important;
+        padding: 0 !important;
+
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+
+        gap: 0 !important;
+
+        text-align: center !important;
+        font-size: 0 !important;
+        line-height: 0 !important;
+    }
+
+    aside nav button svg {
+        width: 20px !important;
+        height: 20px !important;
+
+        min-width: 20px !important;
+        max-width: 20px !important;
+
+        min-height: 20px !important;
+        max-height: 20px !important;
+
+        flex: 0 0 20px !important;
+
+        display: block !important;
+
+        margin: 0 auto !important;
+    }
+
+    aside nav button > span {
+        display: none !important;
+    }
+
+    aside nav button[data-page="market"] {
+        width: 60px !important;
+        height: 43px !important;
+
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+
+        gap: 0 !important;
+    }
+
+    /* Active indicator */
+    aside nav button.active::before {
+        left: -6px !important;
+        top: 8px !important;
+        bottom: 8px !important;
+        width: 3px !important;
+    }
+
+    /* Sync button uses exactly the same icon center */
+    .sync-nav-button {
+        width: 60px !important;
+        height: 43px !important;
+        min-height: 43px !important;
+
+        margin: 18px auto 0 !important;
+        padding: 0 !important;
+
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+
+        gap: 0 !important;
+
+        font-size: 0 !important;
+        line-height: 0 !important;
+    }
+
+    .sync-nav-button svg {
+        width: 20px !important;
+        height: 20px !important;
+
+        min-width: 20px !important;
+        max-width: 20px !important;
+
+        min-height: 20px !important;
+        max-height: 20px !important;
+
+        flex: 0 0 20px !important;
+
+        display: block !important;
+        margin: 0 auto !important;
+    }
+}
+
 
 @media (max-width: 1100px) {
   main {
