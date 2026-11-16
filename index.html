@@ -8,8 +8,9 @@
 </head>
   
 <body>
+<a class="skip-link" href="#appMain">Skip to content</a>
 <div class="app">
-  <aside>
+  <aside aria-label="Application sidebar">
     <div class="logo">
       <span class="logo-mark">  <img src="./data/icons/Gemini_Generated_Image_90alah90alah90al.jpg" alt="YGO Collect"></span>
       <div class="logo-text">
@@ -20,8 +21,8 @@
 
     <div class="sidebar-section-label">MAIN</div>
 
-    <nav>
-      <button class="active" data-page="dashboard">
+    <nav aria-label="Main navigation">
+      <button class="active" data-page="dashboard" data-mobile-label="Home" aria-label="Dashboard" aria-controls="dashboard" aria-current="page" title="Dashboard">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="3" y="3" width="7" height="7" rx="1"></rect>
           <rect x="14" y="3" width="7" height="7" rx="1"></rect>
@@ -31,7 +32,7 @@
         <span>Dashboard</span>
       </button>
 
-      <button data-page="collection">
+      <button data-page="collection" data-mobile-label="Collect" aria-label="Collection" aria-controls="collection" title="Collection">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5z"></path>
           <path d="M4 5.5v16"></path>
@@ -41,7 +42,7 @@
         <span>Collection</span>
       </button>
 
-      <button data-page="spending">
+      <button data-page="spending" data-mobile-label="Spend" aria-label="Spending" aria-controls="spending" title="Spending">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="3" y="5" width="18" height="14" rx="2"></rect>
           <path d="M3 9h18"></path>
@@ -50,7 +51,7 @@
         <span>Spending</span>
       </button>
 
-      <button data-page="cards">
+      <button data-page="cards" data-mobile-label="Cards" aria-label="Cards" aria-controls="cards" title="Cards">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="5" y="3" width="14" height="18" rx="2"></rect>
           <path d="M8 7h8"></path>
@@ -60,7 +61,15 @@
         <span>Cards</span>
       </button>
 
-      <button data-page="decks">
+      <button data-page="rulings" data-mobile-label="Rulings" aria-label="Rulings" aria-controls="rulings" title="Rulings">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 5h16M4 10h16M4 15h10"></path>
+          <path d="m16 18 2 2 4-5"></path>
+        </svg>
+        <span>Rulings</span>
+      </button>
+
+      <button data-page="decks" data-mobile-label="Decks" aria-label="Deck Builder" aria-controls="decks" title="Deck Builder">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="4" y="4" width="13" height="16" rx="2"></rect>
           <path d="M8 2h10a2 2 0 0 1 2 2v14"></path>
@@ -70,7 +79,7 @@
         <span>Deck Builder</span>
       </button>
 
-      <button data-page="market">
+      <button data-page="market" data-mobile-label="Market" aria-label="Marketplace" aria-controls="market" title="Marketplace">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M4 8h16l-1 12H5z"></path>
           <path d="M8 8V6a4 4 0 0 1 8 0v2"></path>
@@ -86,6 +95,8 @@
       type="button"
       class="sync-nav-button"
       id="syncTCGButton"
+      aria-label="Sync TCG Corner"
+      title="Sync TCG Corner"
       onclick="syncTCGCorner()"
     >
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -110,6 +121,7 @@
           role="switch"
           name="theme"
           value="dark"
+          aria-label="Color theme"
         >
 
         <span class="theme__fill"></span>
@@ -131,10 +143,10 @@
     </label>
   </aside>
 
-  <main>
-    <section id="dashboard" class="page active">
+  <main id="appMain" tabindex="-1">
+    <section id="dashboard" class="page active" aria-labelledby="dashboardTitle">
       <div class="topbar">
-        <div><h1>Portfolio</h1><div class="subtitle">Your Yu-Gi-Oh collection and spending in one place.</div></div>
+        <div><h1 id="dashboardTitle">Portfolio</h1><div class="subtitle">Your Yu-Gi-Oh! collection and spending in one place.</div></div>
         
       </div>
 
@@ -145,41 +157,43 @@
         <div class="card"><div class="label">Cards Owned</div><div class="value" id="dashCards">0</div></div>
       </div>
 
-      <div class="section grid" style="grid-template-columns:1.5fr 1fr;">
-        <div class="card">
-          <div class="section-head"><h2>Portfolio Overview</h2><span class="pill">Current value</span></div>
-          <div style="height:190px;display:flex;align-items:center;justify-content:center;color:var(--muted);border:1px dashed var(--border);border-radius:10px;">
-            Portfolio chart placeholder
-          </div>
-        </div>
+      <div class="section grid dashboard-insights">
         <div class="card">
           <div class="section-head"><h2>Spending</h2><span class="pill">This month</span></div>
           <div class="value" id="monthSpent"><span class="currency-symbol">₱</span>0</div>
           <div class="subtitle">Purchases recorded this month</div>
-          <div style="margin-top:25px;" class="label">Average purchase</div>
+          <div class="label dashboard-average-label">Average purchase</div>
           <div class="value" id="avgPurchase"><span class="currency-symbol">₱</span>0</div>
+        </div>
+        <div class="card dashboard-quick-actions">
+          <div class="section-head"><h2>Quick actions</h2></div>
+          <p class="subtitle">Keep your collection up to date.</p>
+          <div class="dashboard-action-list">
+            <button type="button" class="btn primary" onclick="openPurchase()">Add a purchase</button>
+            <button type="button" class="btn" onclick="showPage('cards')">Browse cards</button>
+          </div>
         </div>
       </div>
 
       <div class="section card">
         <div class="section-head"><h2>Recent Purchases</h2><button class="btn" onclick="showPage('spending')">View all</button></div>
-        <div class="table-wrap"><table><thead><tr><th>Date</th><th>Card</th><th>Qty</th><th>Purchase Price</th><th>Market Price</th><th>Total</th><th>Gain/Loss</th></tr></thead><tbody id="recentPurchases"></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Card</th><th scope="col">Qty</th><th scope="col">Purchase Price</th><th scope="col">Market Price</th><th scope="col">Total</th><th scope="col">Gain/Loss</th></tr></thead><tbody id="recentPurchases"></tbody></table></div>
       </div>
     </section>
 
-    <section id="collection" class="page">
+    <section id="collection" class="page" aria-labelledby="collectionTitle">
       <div class="topbar">
-        <div><h1>Collection</h1><div class="subtitle">Cards you own. Purchases automatically add cards here.</div></div>
-        
+        <div><h1 id="collectionTitle">Collection</h1><div class="subtitle">Cards you own. Purchases automatically add cards here.</div></div>
+        <button type="button" class="btn primary" onclick="openPurchase()">Add purchase</button>
       </div>
       <div class="notice">Purchase price is tracked separately from current market value. Adding a purchase also updates your collection quantity.</div>
-      <div class="searchbar"><input id="collectionSearch" oninput="renderCollection()" placeholder="Search your collection..."></div>
+      <div class="searchbar"><input id="collectionSearch" type="search" oninput="renderCollection()" placeholder="Search your collection..." aria-label="Search your collection"></div>
       <div class="card"><div class="collection-card-grid" id="collectionTable"></div></div>
     </section>
 
-    <section id="spending" class="page">
+    <section id="spending" class="page" aria-labelledby="spendingTitle">
       <div class="topbar">
-        <div><h1>Spend Tracker</h1><div class="subtitle">Track exactly what you paid for your cards.</div></div>
+        <div><h1 id="spendingTitle">Spending</h1><div class="subtitle">Track exactly what you paid for your cards.</div></div>
       </div>
       <div class="grid stats">
         <div class="card"><div class="label">Total Spent</div><div class="value" id="spentTotal"><span class="currency-symbol">₱</span>0</div></div>
@@ -188,56 +202,129 @@
         <div class="card"><div class="label">Average Purchase</div><div class="value" id="purchaseAverage"><span class="currency-symbol">₱</span>0</div></div>
       </div>
       <div class="section card purchase-search-section">
-        <div class="section-head"><h2>Add Card Purchase</h2><div class="purchase-search"><input id="spendingCardSearch" oninput="queuePurchaseMatchRender('spending')" placeholder="Search card..."></div></div>
-        <div class="spending-card-matches" id="spendingCardMatches"></div>
+        <div class="section-head"><h2>Add Card Purchase</h2><div class="purchase-search"><input id="spendingCardSearch" type="search" oninput="queuePurchaseMatchRender('spending')" placeholder="Search card..." aria-label="Find a card to add a purchase"></div></div>
+        <div class="spending-card-matches" id="spendingCardMatches" aria-live="polite"></div>
       </div>
       <div class="section card">
         <div class="section-head"><h2>Purchase History</h2></div>
-        <div class="table-wrap"><table><thead><tr><th>Date</th><th>Card</th><th>Printing</th><th>Destination</th><th>Qty</th><th>Price Each</th><th>Market Price</th><th>Total</th><th>Gain/Loss</th><th>Seller</th><th></th></tr></thead><tbody id="purchaseTable"></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Card</th><th scope="col">Printing</th><th scope="col">Price Source</th><th scope="col">Destination</th><th scope="col">Qty</th><th scope="col">Price Each</th><th scope="col">Market Price</th><th scope="col">Total</th><th scope="col">Gain/Loss</th><th scope="col">Seller</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody id="purchaseTable"></tbody></table></div>
       </div>
     </section>
 
-    <section id="cards" class="page">
+    <section id="cards" class="page" aria-labelledby="cardsTitle">
       <div class="topbar">
-        <div><h1>Cards</h1><div class="subtitle">Search Asian-English and Japanese Yu-Gi-Oh cards from TCG Corner.</div></div>
+        <div><h1 id="cardsTitle">Cards</h1><div class="subtitle">Browse the card database, filter cards, and view card text.</div></div>
       </div>
-      <div class="searchbar"><input id="cardSearch" oninput="queueCardRender()" placeholder="Search cards..."></div>
+      <div class="card-browser-panel card">
+        <div class="searchbar card-browser-search">
+          <input id="cardSearch" type="search" oninput="queueCardRender()" placeholder="Search card names, effects, codes, and archetypes..." aria-label="Search cards">
+          <button type="button" class="btn" onclick="clearCardFilters()">Clear filters</button>
+        </div>
+        <div class="card-browser-filters">
+          <label>Card type
+            <select id="cardTypeFilter" onchange="queueCardRender()">
+              <option value="all">All types</option>
+              <option value="monster">Monster</option>
+              <option value="spell">Spell</option>
+              <option value="trap">Trap</option>
+            </select>
+          </label>
+          <label>Attribute
+            <select id="cardAttributeFilter" onchange="queueCardRender()">
+              <option value="all">All attributes</option>
+            </select>
+          </label>
+          <label>Monster type
+            <select id="cardRaceFilter" onchange="queueCardRender()">
+              <option value="all">All monster types</option>
+            </select>
+          </label>
+        </div>
+        <div class="card-browser-summary" id="cardResultSummary" aria-live="polite"></div>
+      </div>
       <div class="grid cards" id="cardGrid"></div>
+      <div class="card-load-more-wrap">
+        <button type="button" class="btn" id="loadMoreCards" onclick="loadMoreCards()" hidden>Show more cards</button>
+      </div>
     </section>
 
-    <section id="decks" class="page">
-      <div class="topbar"><div><h1>Decks</h1><div class="subtitle">Deck builder will connect to your collection.</div></div><button class="btn primary" onclick="addDeck()">+ New Deck</button></div>
+    <section id="rulings" class="page" aria-labelledby="rulingsTitle">
+      <div class="topbar">
+        <div><h1 id="rulingsTitle">Rulings</h1><div class="subtitle">Search and read card Q&amp;A rulings from YGOResources.</div></div>
+      </div>
+      <div class="section card ruling-card-picker">
+        <label for="rulingCardSearch">Find rulings by card name or card code</label>
+        <div class="searchbar">
+          <input id="rulingCardSearch" type="search" oninput="queueRulingCardSearch()" placeholder="Search a card..." aria-label="Find rulings by card name or code">
+        </div>
+        <div id="rulingCardMatches" class="ruling-card-matches" aria-live="polite">Search for a card to view its rulings.</div>
+      </div>
+      <section id="rulingResultsPanel" class="section card ruling-results">
+        <header class="ruling-card-header">
+          <h2 id="rulingCardTitle">Select a card</h2>
+          <p id="rulingCardSummary" class="subtitle">Card details and rulings are loaded when you select a card.</p>
+        </header>
+        <div id="rulingCardDetails" class="ruling-card-overview" hidden>
+          <div id="rulingCardArtwork" class="ruling-card-artwork"></div>
+          <div class="ruling-card-information">
+            <dl id="rulingCardFacts" class="ruling-card-facts"></dl>
+            <section class="ruling-card-effect">
+              <h3>Card text</h3>
+              <p id="rulingCardEffectText"></p>
+            </section>
+          </div>
+        </div>
+        <section id="rulingFaqPanel" class="ruling-faq-panel" hidden>
+          <h3>Related FAQ entries</h3>
+          <div id="rulingFaqEntries" class="ruling-faq-entries"></div>
+        </section>
+        <section class="ruling-qa-panel">
+          <h3>Related Q&amp;A entries</h3>
+          <label for="rulingTextSearch">Filter loaded questions and answers</label>
+          <input id="rulingTextSearch" oninput="filterRulingEntries()" placeholder="Search the loaded questions and answers...">
+          <div id="rulingStatus" class="ruling-status" aria-live="polite"></div>
+          <div id="rulingEntries" class="ruling-entries"></div>
+          <button type="button" class="btn" id="loadMoreRulings" onclick="loadMoreRulings()" hidden>Load more rulings</button>
+        </section>
+        <p class="ruling-api-attribution">Card details, FAQ, and ruling records are served by <a href="https://db.ygoresources.com/about/api" target="_blank" rel="noopener">YGOResources</a>.</p>
+      </section>
+    </section>
+
+    <section id="decks" class="page" aria-labelledby="decksTitle">
+      <div class="topbar"><div><h1 id="decksTitle">Deck Builder</h1><div class="subtitle">Build decks from your card catalog and check limits against the selected banlist.</div></div><button class="btn primary" onclick="addDeck()">+ New Deck</button></div>
       <div class="grid stats">
         <div class="card"><div class="label">My Decks</div><div class="value" id="deckCount">0</div></div>
-        <div class="card"><div class="label">Cards in Deck</div><div class="value" id="deckMissing">0</div></div>
+        <div class="card"><div class="label">Missing Copies</div><div class="value" id="deckMissing">0</div></div>
         <div class="card"><div class="label">Deck Value</div><div class="value" id="deckValue"><span class="currency-symbol">₱</span>0</div></div>
-        <div class="card"><div class="label">Estimated Cost</div><div class="value" id="deckEstimatedCost">₱0</div></div>
+        <div class="card"><div class="label">Cost to Complete</div><div class="value" id="deckEstimatedCost">₱0</div></div>
       </div>
-      
-      
+      <p class="deck-overview-note">Overview totals include all your decks. Choose a deck below to edit its list.</p>
+
       <div class="banlist-selector">
-        <label for="banlistSelect"><h2>Select Banlist:</h2></label>
+        <label for="banlistSelect">Banlist</label>
         <select id="banlistSelect">
           <option value="AE">Asian English</option>
           <option value="TCG">TCG</option>
           <option value="OCG">OCG</option>
         </select>
       </div>
-      <div class="section card empty" id="deckList">No decks yet. The deck builder will use the same card and collection database.</div>
+      <div class="section card empty" id="deckList">No decks yet. Create a deck to start building and check card limits against your selected banlist.</div>
       <div class="section card" id="deckProfile" style="display:none;"></div>
     </section>
 
-    <section id="market" class="page">
+    <section id="market" class="page" aria-labelledby="marketTitle">
       <div class="topbar">
         <div>
-          <h1>Market Place</h1>
-          <div class="subtitle">Input your selling items.</div>
+          <h1 id="marketTitle">Marketplace</h1>
+          <div class="subtitle">Manage your cards listed for sale.</div>
         </div>
       </div>
 
       <div class="searchbar market-searchbar">
         <input id="marketCardSearch"
+              type="search"
               oninput="renderMarketplace()"
+            aria-label="Find cards to list for sale"
             placeholder="Search by card name or card code to browse cards for sale.">
       </div>
       <section class="section card">
@@ -246,10 +333,10 @@
         
       </section>
       <div id="marketCardGrid" class="grid cards"></div>
-      <div class="modal" id="marketplaceModal">
+      <div class="modal" id="marketplaceModal" role="dialog" aria-modal="true" aria-labelledby="marketplaceModalTitle">
         <input id="marketplaceCardId" type="hidden">
       <div class="modal-box">
-        <h2>List Card for Sale</h2>
+        <h2 id="marketplaceModalTitle">List Card for Sale</h2>
 
         <div class="form-grid">
           <label>Card
@@ -286,7 +373,7 @@
 
 
 
-<div id="banlistPopup" class="banlist-popup-overlay">
+<div id="banlistPopup" class="banlist-popup-overlay" role="alertdialog" aria-modal="true" aria-labelledby="banlistPopupTitle" aria-describedby="banlistPopupMessage">
   <div class="banlist-popup">
     <div class="banlist-popup-title" id="banlistPopupTitle">
       Card Limit
@@ -295,7 +382,7 @@
     <div class="banlist-popup-message" id="banlistPopupMessage">
     </div>
 
-    <button id="banlistPopupClose" class="banlist-popup-close">
+    <button type="button" id="banlistPopupClose" class="banlist-popup-close">
       OK
     </button>
   </div>
@@ -323,16 +410,16 @@
 </div>
 
 
-<div class="modal" id="purchaseModal">
+<div class="modal" id="purchaseModal" role="dialog" aria-modal="true" aria-labelledby="purchaseModalTitle">
   <div class="modal-box purchase-modal-box">
-    <h2>Add Purchase</h2>
+    <h2 id="purchaseModalTitle">Add Purchase</h2>
     <div class="subtitle" style="margin-bottom:18px;">One purchase automatically adds the card to your collection.</div>
     <div class="purchase-form-layout">
       <div class="purchase-card-preview" id="purchaseCardPreview"><div class="card-image">No image</div></div>
       <div class="form-grid">
       <label>Card Name
-        <input id="purchaseCardName" oninput="findPurchaseCard()" placeholder="Type card name or card code...">
-        <datalist id="purchaseCardOptions"></datalist>
+        <input id="purchaseCardName" oninput="findPurchaseCard()" placeholder="Type card name or card code..." autocomplete="off" aria-controls="purchaseCardSuggestions" aria-expanded="false">
+        <div id="purchaseCardSuggestions" class="purchase-card-suggestions" role="listbox" aria-label="Matching cards" hidden></div>
         <select id="purchaseCard" style="display:none;"></select>
       </label>
       <label>Rarity
@@ -350,6 +437,7 @@
       </label>
       <label>Price per card
         <input id="purchasePrice" type="number" min="0" step="0.01" value="0">
+        <small id="purchasePriceSource" class="purchase-price-source">Price source: —</small>
       </label>
       <label>Purchase date
         <input id="purchaseDate" type="date">
@@ -366,9 +454,9 @@
   </div>
 </div>
 
-<div class="modal" id="deckModal">
+<div class="modal" id="deckModal" role="dialog" aria-modal="true" aria-labelledby="deckModalTitle">
   <div class="modal-box">
-    <h2>New Deck</h2>
+    <h2 id="deckModalTitle">New Deck</h2>
     <div class="form-grid">
       <label>Deck name
         <input id="deckNameInput" placeholder="e.g. Blue-Eyes White Dragon" maxlength="80">
@@ -383,9 +471,13 @@
 
 
 
-<div id="cardDetailsPanel" class="card-details-panel" hidden>
+<div id="cardDetailsBackdrop" class="card-details-backdrop" hidden aria-hidden="true"></div>
+<div id="cardDetailsPanel" class="card-details-panel" role="dialog" aria-modal="true" aria-labelledby="detailCardName" hidden>
 
-    <button type="button" id="closeCardDetails" class="close-card-details">×</button>
+    <div class="card-details-sticky-header">
+      <h3 id="detailCardHeaderName"></h3>
+      <button type="button" id="closeCardDetails" class="close-card-details" aria-label="Close card details">×</button>
+    </div>
 
     <div class="card-details">
 
@@ -394,82 +486,92 @@
         </div>
 
         <div class="card-details-info">
+            <header class="card-details-heading">
+              <h2 id="detailCardName"></h2>
+              <p id="detailCardType" class="card-details-type"></p>
+            </header>
 
-            <h2 id="detailCardName"></h2>
+            <section class="card-details-section card-details-deck-section" aria-labelledby="addCardToDeckTitle">
+              <h3 id="addCardToDeckTitle">Add to deck</h3>
+              <div class="add-to-deck-controls">
+                <label for="detailCardDeckSelect">Put in
+                  <select id="detailCardDeckSelect"></select>
+                </label>
 
-            <p>
-                <strong>Type:</strong>
-                <span id="detailCardType"></span>
-            </p>
+                <label for="detailCardSetSelect">Set
+                  <select id="detailCardSetSelect"></select>
+                </label>
 
-            <p>
-                <strong>ATK:</strong>
-                <span id="detailCardAtk"></span>
-            </p>
+                <label for="detailCardRaritySelect">Rarity
+                  <select id="detailCardRaritySelect">
+                      <option value="">Select rarity</option>
+                  </select>
+                </label>
 
-            <p>
-                <strong>DEF:</strong>
-                <span id="detailCardDef"></span>
-            </p>
+                <label for="detailCardQuantity">Quantity
+                  <input
+                    type="number"
+                    id="detailCardQuantity"
+                    min="1"
+                    max="3"
+                    value="1">
+                </label>
 
-            <p>
-                <strong>Level:</strong>
-                <span id="detailCardLevel"></span>
-            </p>
+                <button
+                  type="button"
+                  id="addDetailCardToDeck"
+                  class="add-detail-card-btn">
+                  Add to deck
+                </button>
+              </div>
+            </section>
 
-            <p>
-                <strong>Attribute:</strong>
-                <span id="detailCardAttribute"></span>
-            </p>
-
-            <p>
-                <strong>Card Set:</strong>
-                <div id="detailCardSet" class="card-sets-list"></div>
-            </p>
-
-            <p>
-                <strong>Rarity:</strong>
-                <span id="detailCardRarity"></span>
-            </p>
-
-
-            <div class="card-details-description">
-                <strong>Description</strong>
+            <details class="card-details-slot">
+              <summary>Details</summary>
+              <dl class="card-details-facts">
+                <div>
+                  <dt>Attribute</dt>
+                  <dd id="detailCardAttribute"></dd>
+                </div>
+                <div>
+                  <dt>Lv / Rank</dt>
+                  <dd id="detailCardLevel"></dd>
+                </div>
+                <div>
+                  <dt>Type</dt>
+                  <dd id="detailCardRace"></dd>
+                </div>
+                <div>
+                  <dt>ATK / DEF</dt>
+                  <dd><span id="detailCardAtk"></span> / <span id="detailCardDef"></span></dd>
+                </div>
+              </dl>
+              <div class="card-details-description">
                 <p id="detailCardDescription"></p>
+              </div>
+            </details>
+
+            <section class="card-details-section" aria-labelledby="cardDetailsCopiesTitle">
+              <h3 id="cardDetailsCopiesTitle">Copies held</h3>
+              <div id="cardDetailsCopies"></div>
+              <button type="button" class="btn" id="addCardDetailsPurchase" onclick="addCardDetailsPurchase()">Add a purchase</button>
+            </section>
+
+            <section class="card-details-section" aria-labelledby="cardDetailsWishlistTitle">
+              <h3 id="cardDetailsWishlistTitle">Wishlist</h3>
+              <button type="button" class="btn" id="toggleCardWishlist" aria-pressed="false" onclick="toggleCardWishlist()">Add to wishlist</button>
+              <p id="cardDetailsWishlistNote" class="card-details-note"></p>
+              <div id="cardDetailsShopLinks" class="card-details-shop-links"></div>
+            </section>
+
+            <details class="card-details-printings">
+              <summary>All available printings</summary>
+              <div id="detailCardSet" class="card-sets-list"></div>
+            </details>
+
+            <div class="card-details-action-row">
+              <button type="button" id="viewCardRulings" class="btn view-card-rulings">View card rulings</button>
             </div>
-
-            <!-- ADD THE BUTTON HERE -->
-            <div class="add-to-deck-controls">
-              <label for="detailCardSetSelect">Add from set</label>
-              <select id="detailCardSetSelect"></select>
-
-              <label for="detailCardRaritySelect">
-                Rarity
-              </label>
-              <select id="detailCardRaritySelect">
-                  <option value="">Select rarity</option>
-              </select>
-
-              <label for="detailCardQuantity">
-                  Quantity
-              </label>
-
-            <input
-              type="number"
-              id="detailCardQuantity"
-              min="1"
-              max="3"
-              value="1">
-
-            <button
-              type="button"
-              id="addDetailCardToDeck"
-              class="add-detail-card-btn">
-              Add to Deck
-            </button>
-
-          </div>
-
         </div>
     </div>
 </div>

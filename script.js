@@ -4,6 +4,7 @@ const EXCHANGE_RATE_CACHE_KEY = "ygoUsdExchangeRates";
  let localCardDatabase = [];
  let localCardDatabaseReady = false;
  let localCardDatabasePromise = null;
+ let localCardDatabaseError = null;
  let banlists = {
   TCG: {},
   AE: {},
@@ -23,6 +24,107 @@ function getCardImageUrl(card, preferSmall = true) {
   return preferSmall
     ? card?.card_images?.[0]?.image_url_small || card?.card_images?.[0]?.image_url || card?.image || ""
     : card?.card_images?.[0]?.image_url || card?.image || "";
+}
+
+function getCardCatalogMatch(card) {
+  const cards = Array.isArray(localCardDatabase) ? localCardDatabase : [];
+  const hasCatalogId = Array.isArray(card?.card_images) || card?.konami_id || card?.misc_info;
+  if (hasCatalogId && card?.id != null) {
+    const idMatch = cards.find(item => String(item.id) === String(card.id));
+    if (idMatch) return idMatch;
+  }
+
+  const name = String(card?.name || "").trim();
+  if (!name) return null;
+  const nameKey = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const codeKey = String(card?.cardCode || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const codeMatch = codeKey && cards.find(item => {
+    const codes = [
+      item.cardCode,
+      ...(Array.isArray(item.card_sets) ? item.card_sets.map(set => set.set_code) : []),
+      ...(Array.isArray(item.asian_english_sets)
+        ? item.asian_english_sets.flatMap(set => [set.card_code, set.set_code])
+        : []),
+      ...(Array.isArray(item.ocg_sets)
+        ? item.ocg_sets.flatMap(set => [set.card_code, set.set_code])
+        : [])
+    ];
+    return codes.some(value =>
+      String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "") === codeKey
+    );
+  });
+  if (codeMatch) return codeMatch;
+
+  return cards.find(item =>
+    String(item.name || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "") === nameKey
+  ) || null;
+}
+
+function getCardCatalogImage(card) {
+  const catalogCard = getCardCatalogMatch(card);
+  return catalogCard ? getCardImageUrl(catalogCard, false) : "";
+}
+
+function getCardImageWithFallback(card, preferredImage = "") {
+  return preferredImage ||
+    getCardImageUrl(card) ||
+    getCardCatalogImage(card) ||
+    getStoredCardImage(card?.name) ||
+    "";
+}
+
+function getCardImageFallback(card, primaryImage = "") {
+  return [
+    getCardCatalogImage(card),
+    getStoredCardImage(card?.name)
+  ].find(image => image && image !== primaryImage) || "";
+}
+
+function getCardImageMarkup(card, preferredImage = "", altText = "", className = "", tooltipAttributes = "") {
+  const image = getCardImageWithFallback(card, preferredImage);
+  if (!image) {
+    const classes = ["card-image-unavailable", className].filter(Boolean).join(" ");
+    return `<div class="${escapeHtml(classes)}">Image unavailable</div>`;
+  }
+  const fallback = getCardImageFallback(card, image);
+  return `<img${className ? ` class="${escapeHtml(className)}"` : ""}
+    src="${escapeHtml(image)}"
+    data-image-fallback="${escapeHtml(fallback)}"
+    alt="${escapeHtml(altText || card?.name || "Card image")}"
+    loading="lazy"
+    decoding="async"
+    ${tooltipAttributes}>`;
+}
+
+function bindCardImageFallbacks(root = document) {
+  root.querySelectorAll("img[data-image-fallback]").forEach(image => {
+    if (image.dataset.fallbackBound) return;
+    image.dataset.fallbackBound = "true";
+    image.addEventListener("error", () => {
+      const fallback = image.dataset.imageFallback || "";
+      if (fallback) {
+        image.dataset.imageFallback = "";
+        image.src = fallback;
+        return;
+      }
+
+      if (image.id === "detailCardImage") {
+        image.removeAttribute("src");
+        image.alt = "Image unavailable";
+        image.classList.add("image-unavailable");
+        return;
+      }
+
+      const placeholder = document.createElement("span");
+      placeholder.className = "card-image-unavailable";
+      placeholder.textContent = "Image unavailable";
+      const parent = image.parentElement;
+      image.replaceWith(placeholder);
+      if (parent?.classList.contains("card-catalog-image")) {
+        parent.classList.add("image-unavailable");
+      }
+    });
+  });
 }
 
 async function loadLocalCardDatabase() {
@@ -103,13 +205,16 @@ async function loadLocalCardDatabase() {
     cardsWithOcg: localCardDatabase.filter(card => card.ocg_sets.length).length
   });
 
+  localCardDatabaseError = null;
   return localCardDatabase;
 }).catch(error => {
   console.error("Error loading local card database:", error);
   localCardDatabaseReady = false;
+  localCardDatabaseError = error;
+  localCardDatabasePromise = null;
   throw error;
 });
-  return localCardDatabase;
+  return localCardDatabasePromise;
 }
 
 function mergePrintings(existing, additions) {
@@ -454,13 +559,31 @@ let cardRenderTimer;
 let purchaseSearchTimer;
 const purchaseSearchCache = new Map();
 const MAX_CARD_RESULTS = 48;
+let cardVisibleCount = MAX_CARD_RESULTS;
+let cardDetailsRenderToken = 0;
+let cardRulingIndexPromise = null;
+const YGORESOURCES_API = "https://db.ygoresources.com";
+const YGORESOURCES_CARD_NAME_INDEX_URL = `${YGORESOURCES_API}/data/idx/card/name/en`;
+const YGORESOURCES_CARD_URL = `${YGORESOURCES_API}/data/card/`;
+const YGORESOURCES_QA_URL = `${YGORESOURCES_API}/data/qa/`;
+const YGORESOURCES_CACHE = new Map();
+const RULINGS_BATCH_SIZE = 8;
+let selectedRulingCard = null;
+let rulingCardSearchTimer = null;
+let rulingPageToken = 0;
+let rulingQaIds = [];
+let rulingNextQaIndex = 0;
+let rulingFailedQaIds = [];
+let rulingIsLoading = false;
 
 let purchases = JSON.parse(localStorage.getItem("ygoPurchases") || "[]");
+let cardWishlist = JSON.parse(localStorage.getItem("ygoCardWishlist") || "[]");
 let cardDatabase = [];
 let decks = JSON.parse(localStorage.getItem("ygoDecks") || "[]");
 let deckCards = JSON.parse(localStorage.getItem("ygoDeckCards") || "{}");
 let deckCardOrder = JSON.parse(localStorage.getItem("ygoDeckCardOrder") || "{}");
 let activeDeck = "";
+let cardDetailsSelectedDeck = "";
 let selectedDeckCardId = "";
 let deckCardSearchTerm = "";
 let deckApiCards = [];
@@ -473,6 +596,60 @@ const deckSearchCache = new Map();
 function money(n) {
   return formatPrice(n);
 }
+function closeCardDetails() {
+  cardDetailsRenderToken++;
+  const panel = document.getElementById("cardDetailsPanel");
+  const backdrop = document.getElementById("cardDetailsBackdrop");
+  if (panel) panel.hidden = true;
+  if (backdrop) backdrop.hidden = true;
+}
+
+const closeCardDetailsButton = document.getElementById("closeCardDetails");
+if (closeCardDetailsButton) closeCardDetailsButton.onclick = closeCardDetails;
+document.getElementById("cardDetailsBackdrop")
+  ?.addEventListener("click", closeCardDetails);
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && !document.getElementById("cardDetailsPanel")?.hidden) {
+    closeCardDetails();
+  }
+});
+
+document.addEventListener("keydown", event => {
+  const activeDialog = [...document.querySelectorAll('[aria-modal="true"]')]
+    .reverse()
+    .find(dialog => !dialog.hidden && dialog.getClientRects().length);
+  if (!activeDialog) return;
+
+  if (event.key === "Escape" && activeDialog.classList.contains("modal")) {
+    const cancelButton = activeDialog.querySelector(
+      ".modal-actions .btn:not(.primary)"
+    );
+    if (cancelButton) cancelButton.click();
+    return;
+  }
+
+  if (event.key !== "Tab") return;
+  const focusable = [...activeDialog.querySelectorAll(
+    'a[href], button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+  )].filter(element => element.getClientRects().length);
+  if (!focusable.length) {
+    event.preventDefault();
+    return;
+  }
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey &&
+      (document.activeElement === first || !activeDialog.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey &&
+      (document.activeElement === last || !activeDialog.contains(document.activeElement))) {
+    event.preventDefault();
+    first.focus();
+  }
+});
+
 function saveData() {
   localStorage.setItem("ygoPurchases", JSON.stringify(purchases));
   localStorage.setItem("ygoDecks", JSON.stringify(decks));
@@ -481,9 +658,17 @@ function saveData() {
   getStoredCardImage.index = null;
 }
 function showPage(page) {
+  const activePage = document.getElementById(page);
+  if (!activePage || !activePage.classList.contains("page")) return;
+
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
-  document.getElementById(page).classList.add("active");
-  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.page === page));
+  activePage.classList.add("active");
+  document.querySelectorAll("nav button[data-page]").forEach(button => {
+    const isActive = button.dataset.page === page;
+    button.classList.toggle("active", isActive);
+    if (isActive) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
   if(page === "dashboard") renderDashboard();
   if(page === "collection") renderCollection();
   if(page === "spending") {
@@ -491,9 +676,9 @@ function showPage(page) {
     if (!cards.length && !tcgLoading) loadTCGProducts();
   }
   if(page === "cards") {
-    if (!cards.length && !tcgLoading) loadTCGProducts();
     renderCards();
   }
+  if(page === "rulings") renderRulingCardMatches();
   if(page === "decks") renderDecks();
 }
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => showPage(b.dataset.page));
@@ -506,6 +691,39 @@ function populatePurchaseDestinations() {
     ...decks.map(deck => `<option>Deck: ${escapeHtml(deck)}</option>`)
   ].join("");
   if ([...select.options].some(option => option.value === current)) select.value = current;
+}
+
+function populateCardDetailsDeckOptions() {
+  const select = document.getElementById("detailCardDeckSelect");
+  if (!select) return;
+
+  populatePurchaseDestinations();
+  const purchaseDestination = document.getElementById("purchaseDestination");
+  const deckOptions = [...purchaseDestination.options].filter(option =>
+    option.value.startsWith("Deck: ")
+  );
+  const availableDecks = deckOptions.map(option =>
+    option.value.slice("Deck: ".length)
+  );
+  const selectedDeck = [
+    activeDeck,
+    cardDetailsSelectedDeck,
+    decks[0]
+  ].find(deck => availableDecks.includes(deck)) || "";
+
+  select.innerHTML = [
+    `<option value="">${decks.length ? "Select a deck" : "No decks available"}</option>`,
+    ...deckOptions.map(option =>
+      `<option value="${escapeHtml(option.value)}">${escapeHtml(option.textContent)}</option>`
+    )
+  ].join("");
+  select.disabled = deckOptions.length === 0;
+  select.value = selectedDeck ? `Deck: ${selectedDeck}` : "";
+  select.onchange = () => {
+    cardDetailsSelectedDeck = select.value.startsWith("Deck: ")
+      ? select.value.slice("Deck: ".length)
+      : "";
+  };
 }
 
 function addDeck() {
@@ -527,11 +745,11 @@ function saveDeck() {
   }
   if (decks.some(deck => deck.toLowerCase() === deckName.toLowerCase())) return;
   decks.push(deckName);
+  activeDeck = deckName;
   saveData();
   populatePurchaseDestinations();
   closeDeckModal();
   renderDecks();
-  openDeckProfile(deckName);
 }
 
 document.getElementById("deckNameInput").addEventListener("keydown", event => {
@@ -564,90 +782,77 @@ function renderDecks() {
   document.getElementById("deckMissing").textContent = missingCards;
   document.getElementById("deckValue").textContent = money(deckValue);
   document.getElementById("deckEstimatedCost").textContent = money(estimatedCost);
-  document.getElementById("closeCardDetails").onclick = () => {
-  document.getElementById("cardDetailsPanel").hidden = true;};
+  document.getElementById("closeCardDetails").onclick = closeCardDetails;
   if (!decks.length) {
     list.className = "section card empty";
-    list.textContent = "No decks yet. The deck builder will use the same card and collection database.";
+    list.innerHTML = `
+      <div class="deck-empty-state">
+        <p>No decks yet. Create a deck to start building and check card limits against your selected banlist.</p>
+        <button type="button" class="btn primary" onclick="addDeck()">Create your first deck</button>
+      </div>
+    `;
     profile.style.display = "none";
-   
+    return;
   }
-  
 
-  list.className = "section card";
-
-  list.innerHTML = decks.map(deck => `
-    <div class="section-head">
-        <div>
-            <button type="button" class="deck-name-button">
-                ${escapeHtml(deck)}
-            </button>
-
-            <button
-                type="button"
-                class="deck-edit-button"
-                title="Rename deck">
-                ✎
-            </button>
-
-            <button
-                type="button"
-                class="deck-delete-button"
-                title="Delete deck">
-                🗑
-            </button>
-        </div>
-
-        <span class="pill">Deck</span>
+  list.className = "deck-library-list";
+  list.innerHTML = `
+    <div class="deck-library-grid">
+      ${decks.map(deck => {
+        const copyCount = (deckCards[deck] || []).reduce(
+          (sum, entry) => sum + (Number(entry.qty) || 0),
+          0
+        );
+        const isActive = activeDeck === deck;
+        return `
+          <article class="deck-library-card${isActive ? " active" : ""}"${isActive ? ' aria-current="true"' : ""}>
+            <div class="deck-library-card-icon" aria-hidden="true">${isActive ? "✓" : "▤"}</div>
+            <div class="deck-library-card-content">
+              <span class="deck-library-card-label">${isActive ? "Selected deck" : "Deck"}</span>
+              <h2>${escapeHtml(deck)}</h2>
+              <p>${copyCount} ${copyCount === 1 ? "card" : "cards"}</p>
+            </div>
+            <div class="deck-library-card-actions">
+              <button type="button" class="deck-open-button" aria-label="${isActive ? "Close" : "Open"} ${escapeHtml(deck)}" aria-pressed="${isActive}">
+                ${isActive ? "Close deck" : "Open deck"}
+              </button>
+              <button type="button" class="deck-edit-button" aria-label="Rename ${escapeHtml(deck)}" title="Rename deck">Rename</button>
+              <button type="button" class="deck-delete-button" aria-label="Delete ${escapeHtml(deck)}" title="Delete deck">Delete</button>
+            </div>
+          </article>
+        `;
+      }).join("")}
     </div>
-  `).join("");
+  `;
 
-  const deckRows = list.querySelectorAll(".section-head");
-
+  const deckRows = list.querySelectorAll(".deck-library-card");
   deckRows.forEach((row, index) => {
-    const deckNameButton = row.querySelector(".deck-name-button");
-    const renameButton = row.querySelector(".deck-edit-button");
-    const deleteButton = row.querySelector(".deck-delete-button");
-
     const deckName = decks[index];
-
-    deckNameButton.addEventListener("click", event => {
-      event.preventDefault();
-      event.stopPropagation();
-
+    row.querySelector(".deck-open-button").addEventListener("click", () => {
       if (activeDeck === deckName) {
-        activeDeck = null;
+        activeDeck = "";
         renderDecks();
-        return;
-    }
-
-    toggleDeckProfile(deckName);
-});
-
-    renameButton.addEventListener("click", event => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        renameDeck(deckName);
+      } else {
+        openDeckProfile(deckName);
+      }
+      list.querySelectorAll(".deck-open-button")[index]?.focus();
     });
-
-    deleteButton.addEventListener("click", event => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        deleteDeck(deckName);
+    row.querySelector(".deck-edit-button").addEventListener("click", () => {
+      renameDeck(deckName);
+    });
+    row.querySelector(".deck-delete-button").addEventListener("click", () => {
+      deleteDeck(deckName);
     });
   });
 
+  profile.className = "section card deck-profile";
   if (activeDeck && decks.includes(activeDeck)) {
     renderDeckProfile();
+  } else {
+    activeDeck = "";
+    profile.style.display = "none";
+    profile.innerHTML = "";
   }
-
-  list.querySelectorAll(".deck-edit-button").forEach((button, index) => {
-    button.onclick = () => {
-        renameDeck(decks[index]);
-    };
-  });
 
   function deleteDeck(deckName) {
     const existing = document.getElementById("deleteDeckModal");
@@ -728,7 +933,10 @@ function renderDecks() {
 
         // Clear active deck if it was deleted
         if (activeDeck === deckName) {
-            activeDeck = null;
+            activeDeck = "";
+        }
+        if (cardDetailsSelectedDeck === deckName) {
+            cardDetailsSelectedDeck = "";
         }
 
         saveData();
@@ -741,16 +949,6 @@ function renderDecks() {
   }
 }
   
-function toggleDeckProfile(deckName) {
-    if (activeDeck === deckName) {
-        activeDeck = null
-    } else {
-        activeDeck = deckName;
-    }
-
-    renderDecks();
-}
-
 function renameDeck(oldName) {
     const existing = document.getElementById("renameDeckModal");
 
@@ -848,6 +1046,9 @@ function renameDeck(oldName) {
         if (activeDeck === oldName) {
             activeDeck = trimmedName;
         }
+        if (cardDetailsSelectedDeck === oldName) {
+            cardDetailsSelectedDeck = trimmedName;
+        }
 
         saveData();
         populatePurchaseDestinations();
@@ -874,7 +1075,7 @@ function renameDeck(oldName) {
 
 function openDeckProfile(deckName) {
   activeDeck = deckName;
-  renderDeckProfile();
+  renderDecks();
 }
 
 function renderDeckProfile() {
@@ -888,9 +1089,21 @@ function renderDeckProfile() {
   const copies = getDeckCardCopies(activeDeck);
   profile.style.display = "block";
   profile.innerHTML = `
-    <div class="section-head"><h2>${escapeHtml(activeDeck)}</h2><span class="pill">${entries.reduce((sum, entry) => sum + entry.qty, 0)} cards</span></div>
+    <div class="deck-profile-header">
+      <div>
+        <p class="deck-library-card-label">Selected deck</p>
+        <h2>${escapeHtml(activeDeck)}</h2>
+        <p>Organize your list, check the selected banlist, and add cards from the database.</p>
+      </div>
+      <span class="deck-profile-count">${entries.reduce((sum, entry) => sum + (Number(entry.qty) || 0), 0)} cards</span>
+    </div>
     <div class="deck-builder-layout">
-      <div class="deck-list-grid" id="deckCardDropZone">${copies.map(({ entry, copyId }) => {
+      <section class="deck-list-panel" aria-label="Cards in ${escapeHtml(activeDeck)}">
+        <div class="deck-workspace-heading">
+          <div><h3>Deck cards</h3><p>Drag cards to reorder them. Remove copies with the × button.</p></div>
+          <span>${copies.length} ${copies.length === 1 ? "copy" : "copies"}</span>
+        </div>
+        <div class="deck-list-grid" id="deckCardDropZone">${copies.map(({ entry, copyId }) => {
           const card = cards.find(item => String(item.id) === String(entry.cardId)) || entry;
           const name = card?.name || entry.card || "Unknown card";
           const rarity = entry.rarity || "";
@@ -910,15 +1123,23 @@ function renderDeckProfile() {
             </div>
           </div>`;
         }).join("") || `<div class="empty" style="grid-column:1/-1;">No cards in this deck yet.</div>`}</div>
-      <div class="deck-picker-panel">
-        <div class="searchbar">
-          <input id="deckCardSearch" oninput="queueDeckCardSearch()" value="${escapeHtml(deckCardSearchTerm)}" placeholder="Searching the card database...">
-          <input id="deckCardQty" type="number" min="1" value="1" style="max-width:100px;">
-          <button class="btn primary" onclick="addCardToDeck()">Add Card</button>
+      </section>
+      <section class="deck-picker-panel" aria-labelledby="deckPickerHeading">
+        <div class="deck-workspace-heading">
+          <div><h3 id="deckPickerHeading">Add cards</h3><p>Search official card data, then choose the number of copies.</p></div>
         </div>
-        <div class="notice">Type at least 2 characters to find official card data.</div>
-        <div class="deck-card-picker" id="deckCardPicker"></div>
-      </div>
+        <div class="deck-picker-controls">
+          <label for="deckCardSearch">Card name
+            <input id="deckCardSearch" type="search" oninput="queueDeckCardSearch()" value="${escapeHtml(deckCardSearchTerm)}" placeholder="Search cards">
+          </label>
+          <label for="deckCardQty">Copies
+            <input id="deckCardQty" type="number" min="1" max="3" value="1">
+          </label>
+          <button type="button" class="btn primary deck-add-card-button" onclick="addCardToDeck()">Add selected card</button>
+        </div>
+        <p class="deck-picker-hint">Enter at least 2 characters to search. You can also drag a result into the deck list.</p>
+        <div class="deck-card-picker" id="deckCardPicker" aria-live="polite"></div>
+      </section>
     </div>`;
   setupDeckCardReordering();
   renderDeckCardPicker();
@@ -1089,9 +1310,12 @@ function renderDeckCardPicker() {
   }
 
   picker.innerHTML = deckApiCards.slice(0, 60).map(card => `
-    <div
+    <button
+      type="button"
       class="deck-card-option ${String(card.id) === String(selectedDeckCardId) ? "selected" : ""}"
       data-card-id="${escapeHtml(card.id)}"
+      aria-label="Select ${escapeHtml(card.name)}"
+      aria-pressed="${String(card.id) === String(selectedDeckCardId)}"
       draggable="true"
     >
       ${
@@ -1101,7 +1325,7 @@ function renderDeckCardPicker() {
       }
       <strong>${escapeHtml(card.name)}</strong>
       <small>${escapeHtml(card.rarity || "")} · ${escapeHtml(card.cardCode || "")}</small>
-    </div>
+    </button>
   `).join("");
 
   if (!picker.innerHTML) {
@@ -1175,13 +1399,533 @@ function renderDeckCardPicker() {
 
 
 
+function normalizeRulingCardName(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+async function fetchYGOResourcesJSON(url) {
+  const requestUrl = /^https?:\/\//i.test(url)
+    ? url
+    : `${YGORESOURCES_API}${url}`;
+  if (YGORESOURCES_CACHE.has(requestUrl)) {
+    return YGORESOURCES_CACHE.get(requestUrl);
+  }
+
+  const request = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(requestUrl, {
+        cache: "default",
+        headers: { Accept: "application/json" },
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        throw new Error(`YGOResources returned HTTP ${response.status}`);
+      }
+      return await response.json();
+    } finally {
+      clearTimeout(timeout);
+    }
+  })();
+
+  YGORESOURCES_CACHE.set(requestUrl, request);
+  try {
+    return await request;
+  } catch (error) {
+    if (YGORESOURCES_CACHE.get(requestUrl) === request) {
+      YGORESOURCES_CACHE.delete(requestUrl);
+    }
+    throw error;
+  }
+}
+
+function loadCardRulingIndex() {
+  if (!cardRulingIndexPromise) {
+    cardRulingIndexPromise = fetchYGOResourcesJSON(YGORESOURCES_CARD_NAME_INDEX_URL)
+      .then(data => {
+        if (!data || typeof data !== "object" || Array.isArray(data)) {
+          throw new Error("The YGOResources card-name index has an invalid format.");
+        }
+
+        const byName = new Map();
+        const byId = new Map();
+        Object.entries(data).forEach(([name, rawIds]) => {
+          const candidates = Array.isArray(rawIds) ? rawIds : [rawIds];
+          candidates.forEach(candidate => {
+            const id = candidate && typeof candidate === "object"
+              ? candidate.id ?? candidate.card_id ?? candidate.cardId ?? candidate.konami_id
+              : candidate;
+            if (id == null || !/^\d+$/.test(String(id))) return;
+
+            const key = normalizeRulingCardName(name);
+            const stringId = String(id);
+            if (key && !byName.has(key)) byName.set(key, stringId);
+            if (!byId.has(stringId)) byId.set(stringId, name);
+          });
+        });
+
+        if (!byName.size) {
+          throw new Error("The YGOResources card-name index contains no card names.");
+        }
+        return { byName, byId };
+      })
+      .catch(error => {
+        cardRulingIndexPromise = null;
+        throw error;
+      });
+  }
+
+  return cardRulingIndexPromise;
+}
+
+function getDirectRulingCardId(card) {
+  const misc = Array.isArray(card?.misc_info) ? card.misc_info[0] : card?.misc_info;
+  const id = card?.konami_id || card?.konamiId || misc?.konami_id || misc?.konamiId;
+  return id != null && /^\d+$/.test(String(id)) ? String(id) : null;
+}
+
+function normalizeCardRulingText(value, rulingIndex) {
+  const markup = String(value || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:p|div|li)>/gi, "\n")
+    .replace(/<\/?[a-z][^>]*>/gi, "");
+  const decoder = document.createElement("textarea");
+  decoder.innerHTML = markup;
+
+  return decoder.value.replace(/<<\s*(\d+)\s*>>/g, (match, id) =>
+    rulingIndex.byId.get(String(id)) || match
+  ).trim();
+}
+
+function setRulingStatus(message, retry) {
+  const container = document.getElementById("rulingStatus");
+  if (!container) return;
+  container.textContent = "";
+
+  const status = document.createElement("p");
+  status.className = "ruling-status-message";
+  status.textContent = message;
+  container.appendChild(status);
+
+  if (retry) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn";
+    button.textContent = "Retry";
+    button.addEventListener("click", retry);
+    container.appendChild(button);
+  }
+}
+
+function appendRulingRecord(qaId, data, rulingIndex) {
+  const container = document.getElementById("rulingEntries");
+  if (!container) return;
+
+  const translations = data?.qaData || {};
+  const qa = translations.en || translations.ja || {};
+  const title = normalizeCardRulingText(
+    qa.title || qa.question || `Ruling ${qaId}`,
+    rulingIndex
+  );
+  const question = normalizeCardRulingText(qa.question || "", rulingIndex);
+  const answer = normalizeCardRulingText(qa.answer || "", rulingIndex);
+  const entry = document.createElement("details");
+  entry.className = "card-ruling-entry";
+  entry.dataset.searchText = `${title} ${question} ${answer}`.toLowerCase();
+
+  const summary = document.createElement("summary");
+  summary.textContent = title || `Ruling ${qaId}`;
+  entry.appendChild(summary);
+
+  if (question) {
+    const questionElement = document.createElement("p");
+    questionElement.className = "card-ruling-copy";
+    const label = document.createElement("strong");
+    label.textContent = "Q: ";
+    questionElement.append(label, document.createTextNode(question));
+    entry.appendChild(questionElement);
+  }
+
+  if (answer) {
+    const answerElement = document.createElement("p");
+    answerElement.className = "card-ruling-copy";
+    const label = document.createElement("strong");
+    label.textContent = "A: ";
+    answerElement.append(label, document.createTextNode(answer));
+    entry.appendChild(answerElement);
+  }
+
+  container.appendChild(entry);
+}
+
+function appendRulingFact(container, label, value) {
+  if (value === undefined || value === null || value === "") return;
+  const row = document.createElement("div");
+  row.className = "ruling-card-fact";
+  const term = document.createElement("dt");
+  term.textContent = label;
+  const detail = document.createElement("dd");
+  detail.textContent = String(value);
+  row.append(term, detail);
+  container.appendChild(row);
+}
+
+function renderRulingCardDetails(card, data = null) {
+  const details = document.getElementById("rulingCardDetails");
+  const title = document.getElementById("rulingCardTitle");
+  const artwork = document.getElementById("rulingCardArtwork");
+  const facts = document.getElementById("rulingCardFacts");
+  const effectText = document.getElementById("rulingCardEffectText");
+  if (!details || !title || !artwork || !facts || !effectText) return;
+
+  const cardData = data?.cardData?.en || {};
+  const cardName = cardData.name || card.name || "Selected card";
+  title.textContent = cardName;
+  details.hidden = false;
+  artwork.innerHTML = getCardImageMarkup(
+    card,
+    getCardImageUrl(card, false),
+    cardName
+  );
+  bindCardImageFallbacks(artwork);
+
+  facts.textContent = "";
+  appendRulingFact(facts, "Type", card.type || cardData.cardType);
+  appendRulingFact(facts, "Attribute", cardData.attribute || card.attribute);
+  appendRulingFact(
+    facts,
+    "Level / Rank",
+    cardData.level ?? card.level ?? card.rank
+  );
+  appendRulingFact(facts, "Race", card.race);
+  appendRulingFact(facts, "ATK", cardData.atk ?? card.atk);
+  appendRulingFact(facts, "DEF", cardData.def ?? card.def);
+  effectText.textContent = cardData.effectText || getCardDescription(card);
+}
+
+function renderRulingFaq(faqData, emptyMessage) {
+  const panel = document.getElementById("rulingFaqPanel");
+  const container = document.getElementById("rulingFaqEntries");
+  if (!panel || !container) return;
+
+  panel.hidden = false;
+  container.textContent = "";
+  const groups = faqData?.entries;
+  if (!groups || typeof groups !== "object" || Array.isArray(groups)) {
+    const message = document.createElement("p");
+    message.textContent = emptyMessage;
+    container.appendChild(message);
+    return;
+  }
+
+  let renderedGroups = 0;
+  Object.entries(groups).forEach(([effect, entries]) => {
+    if (!Array.isArray(entries)) return;
+    const lines = entries.map(entry =>
+      typeof entry === "string" ? entry : entry?.en || entry?.ja || ""
+    ).filter(Boolean);
+    if (!lines.length) return;
+
+    const group = document.createElement("details");
+    group.className = "ruling-faq-entry";
+    group.open = renderedGroups === 0;
+    const summary = document.createElement("summary");
+    summary.textContent = `Effect ${effect}`;
+    group.appendChild(summary);
+
+    const list = document.createElement("ul");
+    lines.forEach(line => {
+      const item = document.createElement("li");
+      item.textContent = line;
+      list.appendChild(item);
+    });
+    group.appendChild(list);
+    container.appendChild(group);
+    renderedGroups += 1;
+  });
+
+  if (!renderedGroups) {
+    const message = document.createElement("p");
+    message.textContent = emptyMessage;
+    container.appendChild(message);
+  }
+}
+
+function filterRulingEntries() {
+  const query = String(document.getElementById("rulingTextSearch")?.value || "")
+    .trim()
+    .toLowerCase();
+  document.querySelectorAll("#rulingEntries .card-ruling-entry").forEach(entry => {
+    entry.hidden = Boolean(query) && !entry.dataset.searchText.includes(query);
+  });
+}
+
+function renderRulingCardMatches() {
+  const input = document.getElementById("rulingCardSearch");
+  const container = document.getElementById("rulingCardMatches");
+  if (!input || !container) return;
+
+  const query = input.value.trim().toLowerCase();
+  if (!query) {
+    container.textContent = "Search for a card to view its rulings.";
+    return;
+  }
+  if (!localCardDatabaseReady) {
+    container.textContent = "Loading the card database...";
+    loadLocalCardDatabase()
+      .then(renderRulingCardMatches)
+      .catch(error => {
+        console.error("Unable to load cards for ruling search:", error);
+        container.textContent = "The card database could not be loaded.";
+      });
+    return;
+  }
+
+  const normalizedQuery = normalizeRulingCardName(query);
+  const matches = localCardDatabase.filter(card => {
+    const name = String(card.name || "").toLowerCase();
+    const code = getPrimaryCardCode(card).toLowerCase();
+    return name.includes(query) || code.includes(query);
+  }).sort((a, b) => {
+    const score = card => {
+      const name = normalizeRulingCardName(card.name);
+      if (name === normalizedQuery) return 3;
+      if (name.startsWith(normalizedQuery)) return 2;
+      return name.includes(normalizedQuery) ? 1 : 0;
+    };
+    return score(b) - score(a) ||
+      String(a.name || "").localeCompare(String(b.name || ""));
+  }).slice(0, 30);
+
+  if (!matches.length) {
+    container.textContent = "No cards match that name or card code.";
+    return;
+  }
+
+  container.innerHTML = matches.map(card => `
+    <button type="button" class="ruling-card-match" data-card-id="${escapeHtml(card.id)}">
+      <strong>${escapeHtml(card.name || "Unknown card")}</strong>
+      <small>${escapeHtml(getPrimaryCardCode(card) || card.type || "Card")}</small>
+    </button>
+  `).join("");
+  container.querySelectorAll(".ruling-card-match").forEach(button => {
+    button.addEventListener("click", () => {
+      const card = localCardDatabase.find(item =>
+        String(item.id) === button.dataset.cardId
+      );
+      if (card) selectRulingCard(card);
+    });
+  });
+}
+
+function queueRulingCardSearch() {
+  clearTimeout(rulingCardSearchTimer);
+  rulingCardSearchTimer = setTimeout(renderRulingCardMatches, 180);
+}
+
+async function loadSelectedCardRulings(card, token) {
+  const isCurrentSelection = () =>
+    token === rulingPageToken && selectedRulingCard === card;
+  setRulingStatus("Finding this card in the YGOResources database...");
+
+  try {
+    const index = await loadCardRulingIndex();
+    if (!isCurrentSelection()) return;
+
+    const cardId = getDirectRulingCardId(card) ||
+      index.byName.get(normalizeRulingCardName(card.name));
+    if (!cardId) {
+      renderRulingFaq(
+        null,
+        "Related FAQ entries are unavailable because this card is not mapped in YGOResources."
+      );
+      const summary = document.getElementById("rulingCardSummary");
+      if (summary) summary.textContent = "Local card details · no YGOResources record found.";
+      setRulingStatus("This card is not mapped in the YGOResources database.");
+      return;
+    }
+
+    const data = await fetchYGOResourcesJSON(
+      `${YGORESOURCES_CARD_URL}${encodeURIComponent(cardId)}`
+    );
+    if (!isCurrentSelection()) return;
+    if (!data || !Array.isArray(data.qaIndex)) {
+      throw new Error("The YGOResources card response has an invalid format.");
+    }
+
+    renderRulingCardDetails(card, data);
+    renderRulingFaq(data.faqData, "No related FAQ entries are available for this card.");
+    rulingQaIds = [...new Set(data.qaIndex.map(item => {
+      const id = item && typeof item === "object"
+        ? item.id ?? item.qaId ?? item.qa_id
+        : item;
+      return String(id ?? "");
+    }).filter(id => /^\d+$/.test(id)))];
+    rulingNextQaIndex = 0;
+    rulingFailedQaIds = [];
+
+    const summary = document.getElementById("rulingCardSummary");
+    if (summary) {
+      const code = getPrimaryCardCode(card);
+      summary.textContent = [
+        code,
+        `${rulingQaIds.length.toLocaleString()} available ruling${rulingQaIds.length === 1 ? "" : "s"}`
+      ].filter(Boolean).join(" · ");
+    }
+
+    if (!rulingQaIds.length) {
+      setRulingStatus("No rulings are currently listed for this card.");
+      return;
+    }
+    await loadMoreRulings();
+  } catch (error) {
+    console.error(`Unable to load YGOResources rulings for ${card.name}:`, error);
+    if (!isCurrentSelection()) return;
+    renderRulingFaq(null, "Related FAQ entries could not be loaded.");
+    const summary = document.getElementById("rulingCardSummary");
+    if (summary) summary.textContent = "Local card details · YGOResources data unavailable.";
+    setRulingStatus(
+      `Rulings could not be loaded. ${error.message || "Check your connection and try again."}`,
+      () => loadSelectedCardRulings(card, token)
+    );
+  }
+}
+
+function selectRulingCard(card) {
+  if (!card) return;
+  selectedRulingCard = card;
+  const token = ++rulingPageToken;
+  rulingIsLoading = false;
+  rulingQaIds = [];
+  rulingNextQaIndex = 0;
+  rulingFailedQaIds = [];
+
+  const search = document.getElementById("rulingCardSearch");
+  const title = document.getElementById("rulingCardTitle");
+  const summary = document.getElementById("rulingCardSummary");
+  const entries = document.getElementById("rulingEntries");
+  const textSearch = document.getElementById("rulingTextSearch");
+  const loadMore = document.getElementById("loadMoreRulings");
+  if (search) search.value = card.name || "";
+  if (title) title.textContent = card.name || "Selected card";
+  if (summary) summary.textContent = "Loading card details and related rulings...";
+  if (entries) entries.textContent = "";
+  if (textSearch) textSearch.value = "";
+  if (loadMore) {
+    loadMore.hidden = true;
+    loadMore.disabled = false;
+  }
+
+  renderRulingCardDetails(card);
+  renderRulingFaq(null, "Loading related FAQ entries...");
+  renderRulingCardMatches();
+  loadSelectedCardRulings(card, token);
+}
+
+async function loadMoreRulings() {
+  if (!selectedRulingCard || rulingIsLoading) return;
+  const token = rulingPageToken;
+  const retrying = rulingFailedQaIds.length > 0;
+  const batch = retrying
+    ? rulingFailedQaIds.splice(0, RULINGS_BATCH_SIZE)
+    : rulingQaIds.slice(rulingNextQaIndex, rulingNextQaIndex + RULINGS_BATCH_SIZE);
+  if (!batch.length) return;
+  if (!retrying) rulingNextQaIndex += batch.length;
+
+  const button = document.getElementById("loadMoreRulings");
+  rulingIsLoading = true;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Loading rulings...";
+  }
+
+  try {
+    const results = await Promise.allSettled(batch.map(id =>
+      fetchYGOResourcesJSON(`${YGORESOURCES_QA_URL}${encodeURIComponent(id)}`)
+    ));
+    if (token !== rulingPageToken) return;
+
+    const index = await loadCardRulingIndex();
+    if (token !== rulingPageToken) return;
+    results.forEach((result, position) => {
+      if (result.status === "fulfilled" &&
+          result.value &&
+          result.value.qaData &&
+          typeof result.value.qaData === "object") {
+        appendRulingRecord(batch[position], result.value, index);
+      } else {
+        rulingFailedQaIds.push(batch[position]);
+        if (result.status === "rejected") {
+          console.error(`Unable to load YGOResources Q&A ${batch[position]}:`, result.reason);
+        } else {
+          console.error(`YGOResources returned an invalid response for Q&A ${batch[position]}.`);
+        }
+      }
+    });
+
+    filterRulingEntries();
+    const totalLoaded = document.querySelectorAll("#rulingEntries .card-ruling-entry").length;
+    const hasMore = rulingFailedQaIds.length > 0 || rulingNextQaIndex < rulingQaIds.length;
+    const remaining = Math.max(0, rulingQaIds.length - rulingNextQaIndex);
+    setRulingStatus(
+      `Loaded ${totalLoaded.toLocaleString()} of ${rulingQaIds.length.toLocaleString()} rulings.` +
+      (rulingFailedQaIds.length
+        ? ` ${rulingFailedQaIds.length} could not be loaded; use the retry button.`
+        : "")
+    );
+    if (button) {
+      button.hidden = !hasMore;
+      button.disabled = false;
+      button.textContent = rulingFailedQaIds.length
+        ? `Retry failed rulings (${rulingFailedQaIds.length})`
+        : `Load more rulings (${remaining.toLocaleString()} remaining)`;
+    }
+  } catch (error) {
+    console.error("Unable to load more YGOResources rulings:", error);
+    if (token !== rulingPageToken) return;
+    rulingFailedQaIds = [...new Set([...rulingFailedQaIds, ...batch])];
+    setRulingStatus(
+      `Rulings could not be loaded. ${error.message || "Check your connection and try again."}`
+    );
+    if (button) {
+      button.hidden = false;
+      button.disabled = false;
+      button.textContent = `Retry failed rulings (${rulingFailedQaIds.length})`;
+    }
+  } finally {
+    if (token === rulingPageToken) rulingIsLoading = false;
+  }
+}
+
+function showRulingsForCard(card) {
+  closeCardDetails();
+  showPage("rulings");
+  selectRulingCard(card);
+}
+
 async function showCardDetails(card) {
   const panel = document.getElementById("cardDetailsPanel");
   if (!panel || !card) return;
 
-  await loadLocalCardDatabase();
+  const renderToken = ++cardDetailsRenderToken;
+  try {
+    await loadLocalCardDatabase();
+  } catch (error) {
+    console.error("Unable to load card details:", error);
+    showAppAlert("Card details could not be loaded. Check the local card database and try again.");
+    return;
+  }
+  if (renderToken !== cardDetailsRenderToken) return;
 
+  populateCardDetailsDeckOptions();
   const printings = getCardPrintings(card);
+  const detailsDisclosure = document.querySelector(".card-details-slot");
+  if (detailsDisclosure) detailsDisclosure.open = false;
 
   const setElement = document.getElementById("detailCardSet");
   const setSelect = document.getElementById("detailCardSetSelect");
@@ -1262,8 +2006,13 @@ async function showCardDetails(card) {
   document.getElementById("detailCardName").textContent =
     card.name || "N/A";
 
+  document.getElementById("detailCardHeaderName").textContent =
+    card.name || "Card details";
+
   document.getElementById("detailCardType").textContent =
-    card.type || "N/A";
+    [card.type, card.archetype ? `"${card.archetype}"` : ""]
+      .filter(Boolean)
+      .join(" · ") || "N/A";
 
   document.getElementById("detailCardAtk").textContent =
     card.atk ?? "N/A";
@@ -1277,85 +2026,47 @@ async function showCardDetails(card) {
   document.getElementById("detailCardAttribute").textContent =
     card.attribute || "N/A";
 
-  document.getElementById("detailCardRarity").textContent =
-    [...new Set(printings.map(item => item.rarity).filter(Boolean))]
-      .join(", ") || "N/A";
+  document.getElementById("detailCardRace").textContent =
+    card.race || "N/A";
 
   document.getElementById("detailCardDescription").textContent =
-    card.desc || card.cardText || "N/A";
+    getCardDescription(card);
 
   const image = document.getElementById("detailCardImage");
-  const imageUrl = getCardImageUrl(card, false);
+  const imageUrl = getCardImageWithFallback(card, getCardImageUrl(card, false));
 
   if (imageUrl) {
+    image.classList.remove("image-unavailable");
     image.src = imageUrl;
     image.alt = card.name || "";
+    image.dataset.imageFallback = getCardImageFallback(card, imageUrl);
+    bindCardImageFallbacks(image.parentElement);
   } else {
     image.removeAttribute("src");
+    delete image.dataset.imageFallback;
     image.alt = "No image";
   }
 
-  const addButton = document.getElementById("addDetailCardToDeck");
-
-  if (addButton) {
-    addButton.onclick = event => {
-      event.preventDefault();
-
-      if (!activeDeck) {
-        showAppAlert("Select or create a deck first.");
-        return;
-      }
-
-      const selectedOption = setSelect?.selectedOptions?.[0];
-      const selectedSet = selectedOption?.dataset.set || "";
-      const selectedRegion = selectedOption?.dataset.region || "TCG";
-      const selectedRarity = raritySelect?.value || "";
-
-      const quantity = Math.min(
-        3,
-        Math.max(
-          1,
-          Number(document.getElementById("detailCardQuantity")?.value) || 1
-        )
-      );
-
-      const printing = printings.find(item =>
-        item.set === selectedSet &&
-        item.region === selectedRegion &&
-        item.rarity === selectedRarity
-      );
-
-      if (!printing) {
-        showAppAlert("Select a valid set and rarity.");
-        return;
-      }
-
-      const added = addCardEntryToDeck(
-        activeDeck,
-        card,
-        quantity,
-        selectedRarity,
-        getTcgCornerRarity(selectedRarity),
-        selectedSet,
-        selectedRegion
-      );
-
-      if (added === true) {
-        saveData();
-        panel.hidden = true;
-        renderDecks();
-      }
-    };
+  panel.dataset.cardId = String(card.id);
+  renderCardDetailsInventory(card);
+  renderCardWishlist(card);
+  const viewRulingsButton = document.getElementById("viewCardRulings");
+  if (viewRulingsButton) {
+    viewRulingsButton.onclick = () => showRulingsForCard(card);
   }
 
   panel.hidden = false;
+  document.getElementById("cardDetailsBackdrop").hidden = false;
+  document.getElementById("closeCardDetails")?.focus({ preventScroll: true });
 }
 
 
 function selectDeckCard(cardId) {
   selectedDeckCardId = cardId;
   document.querySelectorAll(".deck-card-option").forEach(tile => {
-    tile.classList.toggle("selected", tile.dataset.cardId === cardId);
+    const isSelected = tile.dataset.cardId === cardId;
+    tile.classList.toggle("selected", isSelected);
+    tile.setAttribute("aria-pressed", String(isSelected));
   });
 }
 
@@ -1884,6 +2595,13 @@ async function deletePurchase(purchaseId) {
   renderCollection();
   renderSpending();
   renderDecks();
+  const detailsPanel = document.getElementById("cardDetailsPanel");
+  if (detailsPanel && !detailsPanel.hidden) {
+    const detailCard = localCardDatabase.find(
+      card => String(card.id) === detailsPanel.dataset.cardId
+    );
+    if (detailCard) renderCardDetailsInventory(detailCard);
+  }
 }
 
 async function deleteCollectionGroup(cardId, printing, destination) {
@@ -1902,6 +2620,13 @@ async function deleteCollectionGroup(cardId, printing, destination) {
   renderCollection();
   renderSpending();
   renderDecks();
+  const detailsPanel = document.getElementById("cardDetailsPanel");
+  if (detailsPanel && !detailsPanel.hidden) {
+    const detailCard = localCardDatabase.find(
+      card => String(card.id) === detailsPanel.dataset.cardId
+    );
+    if (detailCard) renderCardDetailsInventory(detailCard);
+  }
 }
 
 function openPurchase() {
@@ -1918,28 +2643,96 @@ function openPurchase() {
     if (!groups.has(key)) groups.set(key, card);
   });
   select.innerHTML = [...groups.values()].map(card => `<option value="${escapeHtml(card.id)}">${escapeHtml(card.name)} · ${escapeHtml(card.cardCode)}</option>`).join("");
-  document.getElementById("purchaseCardOptions").innerHTML = [...groups.values()].map(card => `<option value="${escapeHtml(card.name)}" label="${escapeHtml(card.cardCode)}"></option>`).join("");
-  document.getElementById("purchaseCardName").value = "";
+  const search = document.getElementById("purchaseCardName");
+  search.value = "";
+  updatePurchaseCardSuggestions([]);
   document.getElementById("purchaseDate").value = new Date().toISOString().slice(0,10);
   updatePurchaseFields();
   document.getElementById("purchaseModal").classList.add("open");
+  search.focus();
 }
-function findPurchaseCard() {
-  const query = document.getElementById("purchaseCardName").value.toLowerCase().trim();
-  if (!query) return;
-  const card = cards.find(item => item.name.toLowerCase() === query || item.cardCode.toLowerCase() === query);
-  if (!card) return;
+
+function normalizePurchaseSearchValue(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function updatePurchaseCardSuggestions(matches, showNoResults = false) {
+  const input = document.getElementById("purchaseCardName");
+  const container = document.getElementById("purchaseCardSuggestions");
+  if (!input || !container) return;
+
+  container.innerHTML = matches.map(card => `
+    <button type="button" class="purchase-card-suggestion" role="option" aria-selected="false" data-card-id="${escapeHtml(card.id)}">
+      <strong>${escapeHtml(card.name)}</strong>
+      <small>${escapeHtml(card.cardCode || "Card code unavailable")} · ${escapeHtml(card.sourceName || "TCG Corner")}${card.sourceLanguage ? ` · ${escapeHtml(card.sourceLanguage)}` : ""}</small>
+    </button>
+  `).join("") || (showNoResults ? `<div class="purchase-card-no-results">No cards match this name or card code.</div>` : "");
+  const isVisible = matches.length > 0 || showNoResults;
+  container.hidden = !isVisible;
+  input.setAttribute("aria-expanded", String(isVisible));
+}
+
+function selectPurchaseCard(card) {
   const option = [...document.getElementById("purchaseCard").options].find(item => {
     const optionCard = cards.find(cardItem => String(cardItem.id) === String(item.value));
-    return optionCard && optionCard.sourceLanguage === card.sourceLanguage &&
+    return optionCard &&
+      (optionCard.sourceName || "TCG Corner") === (card.sourceName || "TCG Corner") &&
+      optionCard.sourceLanguage === card.sourceLanguage &&
       (optionCard.cardCode ? optionCard.cardCode === card.cardCode : optionCard.productId === card.productId);
   });
-  if (option) document.getElementById("purchaseCard").value = option.value;
+  if (!option) return;
+
+  document.getElementById("purchaseCard").value = option.value;
   document.getElementById("purchaseCardName").value = card.name;
+  updatePurchaseCardSuggestions([]);
   updatePurchaseFields();
 }
+
+function findPurchaseCard() {
+  const query = normalizePurchaseSearchValue(document.getElementById("purchaseCardName").value);
+  const raritySelect = document.getElementById("purchaseRarity");
+  document.getElementById("purchaseCard").value = "";
+  raritySelect.innerHTML = `<option value="">Select Rarity</option>`;
+  document.getElementById("purchaseCardPreview").innerHTML = `<div class="card-image">No image</div>`;
+  document.getElementById("purchasePriceSource").textContent = "Price source: —";
+  if (!query) {
+    updatePurchaseCardSuggestions([]);
+    return;
+  }
+
+  const groups = new Map();
+  cards.forEach(card => {
+    const name = normalizePurchaseSearchValue(card.name);
+    const code = normalizePurchaseSearchValue(card.cardCode);
+    if (!name.includes(query) && !code.includes(query)) return;
+    const key = `${card.sourceName || "TCG Corner"}|${card.sourceLanguage}|${card.cardCode || card.productId}`;
+    if (!groups.has(key)) groups.set(key, card);
+  });
+  const matches = [...groups.values()];
+  const exactMatch = matches.find(card =>
+    normalizePurchaseSearchValue(card.name) === query ||
+    normalizePurchaseSearchValue(card.cardCode) === query
+  );
+  if (exactMatch) {
+    selectPurchaseCard(exactMatch);
+    return;
+  }
+  updatePurchaseCardSuggestions(matches.slice(0, 12), matches.length === 0);
+}
+
+document.getElementById("purchaseCardSuggestions").addEventListener("click", event => {
+  const button = event.target.closest("[data-card-id]");
+  if (!button) return;
+  const card = cards.find(item => String(item.id) === String(button.dataset.cardId));
+  if (card) selectPurchaseCard(card);
+});
 function getRarityVariants(card) {
   return cards.filter(item =>
+    (item.sourceName || "TCG Corner") === (card.sourceName || "TCG Corner") &&
     item.sourceLanguage === card.sourceLanguage &&
     (item.cardCode ? item.cardCode === card.cardCode : item.productId === card.productId)
   );
@@ -1956,14 +2749,15 @@ function updatePurchaseRarity() {
   const card = cards.find(c => c.id == document.getElementById("purchaseRarity").value);
   if (!card) return;
   document.getElementById("purchasePrice").value = card.price || 0;
+  document.getElementById("purchasePriceSource").textContent =
+    `Price source: ${card.sourceName || "TCG Corner"}`;
   renderPurchaseCardPreview(card);
 }
 function renderPurchaseCardPreview(card) {
   const preview = document.getElementById("purchaseCardPreview");
   if (!preview) return;
-  preview.innerHTML = card?.image
-    ? `<img src="${escapeHtml(card.image)}" alt="${escapeHtml(card.name)}">`
-    : `<div class="card-image">No image</div>`;
+  preview.innerHTML = getCardImageMarkup(card, card?.image, card?.name, "purchase-preview-image");
+  bindCardImageFallbacks(preview);
 }
 document.getElementById("purchaseCard").addEventListener("change", updatePurchaseFields);
 document.getElementById("purchaseRarity").addEventListener("change", updatePurchaseRarity);
@@ -1976,6 +2770,190 @@ function getPurchasePrintingLabel(purchase) {
   return `${set} · ${rarity}`;
 }
 
+function getPurchaseSourceName(purchase) {
+  const savedSource = String(purchase?.sourceName || "").trim();
+  if (savedSource) return savedSource;
+
+  const card = cards.find(item => String(item.id) === String(purchase?.cardId));
+  if (card?.sourceName) return card.sourceName;
+
+  if (/players\s*club/i.test(String(purchase?.cardId || ""))) {
+    return "Players Club";
+  }
+  return "Unknown source";
+}
+
+function getCardDetailsPurchaseGroups(card) {
+  const cardName = normalizeRulingCardName(card?.name);
+  const cardId = String(card?.id ?? "");
+  const groups = new Map();
+
+  purchases.forEach(purchase => {
+    const storedCard = cards.find(
+      item => String(item.id) === String(purchase.cardId)
+    );
+    const purchaseName = normalizeRulingCardName(
+      purchase.card || storedCard?.name
+    );
+    if (String(purchase.cardId) !== cardId && purchaseName !== cardName) return;
+
+    const printing = getPurchasePrintingLabel(purchase);
+    const destination = purchase.destination || "Binder Collection";
+    const key = `${purchase.cardId}|${printing}|${destination}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        cardId: String(purchase.cardId),
+        printing,
+        destination,
+        quantity: 0,
+        total: 0,
+        sourceName: getPurchaseSourceName(purchase)
+      });
+    }
+
+    const group = groups.get(key);
+    const quantity = Number(purchase.qty) || 0;
+    group.quantity += quantity;
+    group.total += Number.isFinite(Number(purchase.total))
+      ? Number(purchase.total)
+      : (Number(purchase.price) || 0) * quantity;
+  });
+
+  return [...groups.values()];
+}
+
+function renderCardDetailsInventory(card) {
+  const container = document.getElementById("cardDetailsCopies");
+  if (!container) return;
+
+  const groups = getCardDetailsPurchaseGroups(card);
+  container.innerHTML = groups.length
+    ? groups.map(group => `
+        <article class="card-copy-row">
+          <div class="card-copy-row-heading">
+            <strong>${escapeHtml(group.printing)}</strong>
+            <span>×${group.quantity}</span>
+          </div>
+          <p>${escapeHtml(group.sourceName)} · ${escapeHtml(group.destination)} · ${money(group.quantity ? group.total / group.quantity : 0)} / copy</p>
+          <button
+            type="button"
+            class="btn"
+            data-remove-copy
+            data-card-id="${escapeHtml(group.cardId)}"
+            data-printing="${escapeHtml(group.printing)}"
+            data-destination="${escapeHtml(group.destination)}"
+            aria-label="Remove all ${group.quantity} copies of ${escapeHtml(group.printing)}">
+            Clear
+          </button>
+        </article>
+      `).join("")
+    : `<p class="card-details-empty">No copies recorded yet.</p>`;
+}
+
+function renderCardWishlist(card) {
+  const button = document.getElementById("toggleCardWishlist");
+  const note = document.getElementById("cardDetailsWishlistNote");
+  const links = document.getElementById("cardDetailsShopLinks");
+  if (!button || !note || !links) return;
+
+  const cardId = String(card?.id ?? "");
+  const cardName = normalizeRulingCardName(card?.name);
+  const isSaved = cardWishlist.some(entry =>
+    String(entry?.id ?? "") === cardId ||
+    normalizeRulingCardName(entry?.name) === cardName
+  );
+  button.textContent = isSaved ? "Remove from wishlist" : "Add to wishlist";
+  button.setAttribute("aria-pressed", String(isSaved));
+
+  const listings = cards.filter(item =>
+    normalizeRulingCardName(item.name) === cardName &&
+    Number.isFinite(Number(item.price)) &&
+    Number(item.price) > 0
+  );
+  if (listings.length) {
+    const prices = listings.map(item => Number(item.price));
+    const minPrice = Math.min(...prices);
+    const maxPrice = Math.max(...prices);
+    note.textContent = `Current listings range from ${money(minPrice)} to ${money(maxPrice)} across ${listings.length} printings.`;
+  } else {
+    note.textContent = "Save this card to your wishlist and check supported shops for current listings.";
+  }
+
+  const query = encodeURIComponent(card?.name || "");
+  links.innerHTML = `
+    <a href="https://tcg-corner.com/search?q=${query}" target="_blank" rel="noopener">TCG Corner ↗</a>
+    <a href="https://playersclubhk.com/en/search?q=${query}" target="_blank" rel="noopener">Players Club ↗</a>
+  `;
+}
+
+function toggleCardWishlist() {
+  const panel = document.getElementById("cardDetailsPanel");
+  const cardId = panel?.dataset.cardId || "";
+  const card = localCardDatabase.find(item => String(item.id) === cardId);
+  if (!card) {
+    showAppAlert("Card details are not ready yet. Please try again.");
+    return;
+  }
+
+  const cardName = normalizeRulingCardName(card.name);
+  const isSaved = cardWishlist.some(entry =>
+    String(entry?.id ?? "") === String(card.id) ||
+    normalizeRulingCardName(entry?.name) === cardName
+  );
+  cardWishlist = isSaved
+    ? cardWishlist.filter(entry =>
+        String(entry?.id ?? "") !== String(card.id) &&
+        normalizeRulingCardName(entry?.name) !== cardName
+      )
+    : [...cardWishlist, {
+        id: String(card.id),
+        name: card.name,
+        image: getCardImageWithFallback(card)
+      }];
+
+  try {
+    localStorage.setItem("ygoCardWishlist", JSON.stringify(cardWishlist));
+  } catch (error) {
+    console.error("Unable to save the card wishlist:", error);
+    showAppAlert("Your wishlist could not be saved. Check available browser storage and try again.");
+    return;
+  }
+
+  renderCardWishlist(card);
+}
+
+function addCardDetailsPurchase() {
+  const cardId = document.getElementById("cardDetailsPanel")?.dataset.cardId || "";
+  const card = localCardDatabase.find(item => String(item.id) === cardId);
+  if (!card) {
+    showAppAlert("Card details are not ready yet. Please try again.");
+    return;
+  }
+
+  const name = normalizeRulingCardName(card.name);
+  const purchaseCard = cards.find(
+    item => normalizeRulingCardName(item.name) === name
+  );
+  if (!purchaseCard) {
+    showAppAlert("This card is not currently listed in the purchase catalog.");
+    return;
+  }
+
+  closeCardDetails();
+  openPurchaseFor(purchaseCard.id);
+}
+
+document.getElementById("cardDetailsCopies")
+  ?.addEventListener("click", event => {
+    const button = event.target.closest("[data-remove-copy]");
+    if (!button) return;
+    void deleteCollectionGroup(
+      button.dataset.cardId,
+      button.dataset.printing,
+      button.dataset.destination
+    );
+  });
+
 function savePurchase() {
   const card = cards.find(c => c.id == document.getElementById("purchaseRarity").value);
   const qty = Number(document.getElementById("purchaseQty").value);
@@ -1986,6 +2964,8 @@ function savePurchase() {
     id: Date.now(),
     cardId: card.id,
     card: card.name,
+    image: getCardImageWithFallback(card),
+    sourceName: card.sourceName || "TCG Corner",
     printing: getPurchasePrintingLabel({
       cardId: card.id,
       set: getSetCode(card.cardCode) || card.cardCode,
@@ -2027,7 +3007,7 @@ function collectionRows() {
     const destination = p.destination || "Binder Collection";
     const printing = getPurchasePrintingLabel(p);
     const key = p.cardId + "|" + printing + "|" + destination;
-    if(!map[key]) map[key] = {cardId:p.cardId,card:p.card,printing,destination,qty:0,paid:0};
+    if(!map[key]) map[key] = {cardId:p.cardId,card:p.card,image:p.image || "",printing,destination,qty:0,paid:0};
     map[key].qty += Number(p.qty || 0);
     map[key].paid += p.total;
   });
@@ -2084,21 +3064,7 @@ function renderCollection() {
       return `
         <div class="collection-card-tile">
 
-          ${
-            card?.image
-              ? `
-                <img
-                  src="${escapeHtml(card.image)}"
-                  alt="${escapeHtml(r.card)}"
-                  ${cardTooltipAttributes(card, card.rarity)}
-                >
-              `
-              : `
-                <div class="card-image">
-                  No image
-                </div>
-              `
-          }
+          ${getCardImageMarkup(card, r.image, r.card, "", cardTooltipAttributes(card, card?.rarity))}
 
           <span
             class="collection-card-quantity"
@@ -2141,6 +3107,7 @@ function renderCollection() {
         No cards in your collection.
       </div>
     `;
+  bindCardImageFallbacks(document.getElementById("collectionTable"));
 }
 
 function queuePurchaseMatchRender(type) {
@@ -2168,13 +3135,14 @@ function renderPurchaseCardMatches(searchId, matchesId) {
   const cacheKey = query;
   if (purchaseSearchCache.has(cacheKey)) {
     matchesContainer.innerHTML = purchaseSearchCache.get(cacheKey);
+    bindCardImageFallbacks(matchesContainer);
     return;
   }
 
   const groups = new Map();
   cards.forEach(card => {
     if (!card.name.toLowerCase().includes(query) && !card.cardCode.toLowerCase().includes(query)) return;
-    const key = `${card.sourceLanguage}|${card.cardCode || card.productId}`;
+    const key = `${card.sourceName || "TCG Corner"}|${card.sourceLanguage}|${card.cardCode || card.productId}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(card);
   });
@@ -2183,7 +3151,10 @@ function renderPurchaseCardMatches(searchId, matchesId) {
     const card = variants[0];
     const rarityOptions = [...new Map(variants.map(variant => [variant.rarity, variant])).values()];
     return `<div class="spending-card-match">
-      <div class="spending-card-match-identity"><strong>${escapeHtml(card.name)}</strong><small>${escapeHtml(card.cardCode)} · ${escapeHtml(card.sourceLanguage || "Catalog")}</small></div>
+      <div class="spending-card-match-identity">
+        ${getCardImageMarkup(card, card.image, card.name, "spending-card-match-image")}
+        <div><strong>${escapeHtml(card.name)}</strong><small>${escapeHtml(card.cardCode)} · ${escapeHtml(card.sourceLanguage || "Catalog")} · ${escapeHtml(card.sourceName || "TCG Corner")}</small></div>
+      </div>
       <select onchange="updateSpendingPurchase(this)">
         ${rarityOptions.map(variant => `<option value="${escapeHtml(variant.id)}">${escapeHtml(variant.rarity)} · ${money(variant.price)}</option>`).join("")}
       </select>
@@ -2196,6 +3167,7 @@ function renderPurchaseCardMatches(searchId, matchesId) {
     : `<div class="empty">No cards match this name or card code.</div>`;
   purchaseSearchCache.set(cacheKey, resultMarkup);
   matchesContainer.innerHTML = resultMarkup;
+  bindCardImageFallbacks(matchesContainer);
 }
 
 function renderSpendingCardMatches() {
@@ -2226,10 +3198,26 @@ function renderSpending() {
   document.getElementById("purchaseTable").innerHTML = purchases.map(p =>
     (() => {
       const marketPrice = cards.find(card => String(card.id) === String(p.cardId))?.price || 0;
+      const card = cards.find(item => String(item.id) === String(p.cardId)) ||
+        getCardCatalogMatch({ name: p.card });
       const gain = marketPrice * Number(p.qty || 0) - p.total;
-      return `<tr><td>${p.date}</td><td>${p.card}</td><td>${escapeHtml(getPurchasePrintingLabel(p))}</td><td>${escapeHtml(p.destination || "Binder Collection")}</td><td>${p.qty}</td><td>${money(p.price)}</td><td>${money(marketPrice)}</td><td>${money(p.total)}</td><td class="${gain >= 0 ? "green" : "red"}">${gain >= 0 ? "+" : ""}${money(gain)}</td><td>${escapeHtml(p.seller || "—")}</td><td><button class="btn" onclick="deletePurchase('${escapeHtml(p.id)}')">Delete</button></td></tr>`;
+      return `<tr>
+        <td>${escapeHtml(p.date || "")}</td>
+        <td><div class="spending-history-card">${getCardImageMarkup(card, p.image, p.card, "spending-history-card-image")}<span>${escapeHtml(p.card)}</span></div></td>
+        <td>${escapeHtml(getPurchasePrintingLabel(p))}</td>
+        <td><span class="price-source-badge">${escapeHtml(getPurchaseSourceName(p))}</span></td>
+        <td>${escapeHtml(p.destination || "Binder Collection")}</td>
+        <td>${Number(p.qty || 0)}</td>
+        <td>${money(p.price)}</td>
+        <td>${money(marketPrice)}</td>
+        <td>${money(p.total)}</td>
+        <td class="${gain >= 0 ? "green" : "red"}">${gain >= 0 ? "+" : ""}${money(gain)}</td>
+        <td>${escapeHtml(p.seller || "—")}</td>
+        <td><button class="btn" onclick="deletePurchase('${escapeHtml(p.id)}')">Delete</button></td>
+      </tr>`;
     })()
-  ).join("") || `<tr><td colspan="11" class="empty">No purchases recorded.</td></tr>`;
+  ).join("") || `<tr><td colspan="12" class="empty">No purchases recorded.</td></tr>`;
+  bindCardImageFallbacks(document.getElementById("purchaseTable"));
 }
 
 function escapeHtml(value) {
@@ -2297,114 +3285,196 @@ function getCardName(title) {
 
 function queueCardRender() {
   clearTimeout(cardRenderTimer);
-  cardRenderTimer = setTimeout(renderCards, 300);
+  cardVisibleCount = MAX_CARD_RESULTS;
+  cardRenderTimer = setTimeout(renderCards, 180);
+}
+
+function populateCardFilter(selectId, values, allLabel) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+
+  const previousValue = select.value;
+  const options = [...new Set(values.map(value => String(value || "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+  select.innerHTML = `<option value="all">${escapeHtml(allLabel)}</option>${options
+    .map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`)
+    .join("")}`;
+
+  if (options.includes(previousValue)) select.value = previousValue;
+}
+
+function populateCardFilters() {
+  populateCardFilter(
+    "cardAttributeFilter",
+    localCardDatabase.map(card => card.attribute),
+    "All attributes"
+  );
+  populateCardFilter(
+    "cardRaceFilter",
+    localCardDatabase
+      .filter(card => String(card.type || "").toLowerCase().includes("monster"))
+      .map(card => card.race),
+    "All monster types"
+  );
+}
+
+function clearCardFilters() {
+  const search = document.getElementById("cardSearch");
+  if (search) search.value = "";
+  ["cardTypeFilter", "cardAttributeFilter", "cardRaceFilter"].forEach(id => {
+    const select = document.getElementById(id);
+    if (select) select.value = "all";
+  });
+  queueCardRender();
+}
+
+async function retryCardDatabase() {
+  const grid = document.getElementById("cardGrid");
+  if (grid) grid.innerHTML = `<div class="card empty" style="grid-column:1/-1;">Loading the local card database...</div>`;
+
+  try {
+    await loadLocalCardDatabase();
+    populateCardFilters();
+    renderCards();
+  } catch (error) {
+    console.error("Unable to reload the local card database:", error);
+    localCardDatabaseError = error;
+    renderCards();
+  }
+}
+
+function loadMoreCards() {
+  cardVisibleCount += MAX_CARD_RESULTS;
+  renderCards();
 }
 
 function renderCards() {
-  const q = document.getElementById("cardSearch").value.toLowerCase().trim();
+  const search = document.getElementById("cardSearch");
   const grid = document.getElementById("cardGrid");
+  const summary = document.getElementById("cardResultSummary");
+  const loadMore = document.getElementById("loadMoreCards");
+  if (!grid) return;
 
-  if (tcgLoading) {
-    grid.innerHTML = `<div class="card empty" style="grid-column:1/-1;">Loading Yu-Gi-Oh products from TCG Corner...</div>`;
+  if (!localCardDatabaseReady) {
+    if (summary) summary.textContent = "";
+    if (loadMore) loadMore.hidden = true;
+    if (localCardDatabaseError) {
+      grid.innerHTML = `<div class="card empty" style="grid-column:1/-1;">
+        <strong>Unable to load the local card database.</strong><br><br>
+        ${escapeHtml(localCardDatabaseError.message || "An unexpected error occurred.")}
+        <br><br><button type="button" class="btn primary" onclick="retryCardDatabase()">Retry</button>
+      </div>`;
+    } else {
+      grid.innerHTML = `<div class="card empty" style="grid-column:1/-1;">Loading the local card database...</div>`;
+    }
     return;
   }
 
-  if (tcgError) {
-    grid.innerHTML = `<div class="card empty" style="grid-column:1/-1;">
-      <strong>Unable to load TCG Corner</strong><br><br>${escapeHtml(tcgError)}
-      <br><br><button class="btn primary" onclick="loadTCGProducts()">Retry</button>
-    </div>`;
-    return;
-  }
+  const query = String(search?.value || "").trim().toLowerCase();
+  const terms = query.split(/\s+/).filter(Boolean);
+  const normalizedQuery = query.replace(/[^a-z0-9]/g, "");
+  const selectedType = String(document.getElementById("cardTypeFilter")?.value || "all").toLowerCase();
+  const selectedAttribute = String(document.getElementById("cardAttributeFilter")?.value || "all").toLowerCase();
+  const selectedRace = String(document.getElementById("cardRaceFilter")?.value || "all").toLowerCase();
 
-  if (!q) {
-    grid.innerHTML = `<div class="card empty" style="grid-column:1/-1;">Search for a card to view results.</div>`;
-    return;
-  }
+  const matchingCards = localCardDatabase.filter(card => {
+    const type = String(card.type || "").toLowerCase();
+    if (selectedType !== "all" && !type.includes(selectedType)) return false;
+    if (selectedAttribute !== "all" && String(card.attribute || "").toLowerCase() !== selectedAttribute) return false;
+    if (selectedRace !== "all" &&
+        (!type.includes("monster") || String(card.race || "").toLowerCase() !== selectedRace)) return false;
 
-  const groups = new Map();
-  cards.forEach(card => {
-    const groupKey = getCardCatalogGroupKey(card);
-    if (!groups.has(groupKey)) groups.set(groupKey, []);
-    groups.get(groupKey).push(card);
+    if (!terms.length) return true;
+
+    const cardSets = Array.isArray(card.card_sets) ? card.card_sets : [];
+    const printings = [
+      ...cardSets,
+      ...(Array.isArray(card.asian_english_sets) ? card.asian_english_sets : []),
+      ...(Array.isArray(card.ocg_sets) ? card.ocg_sets : [])
+    ];
+    const searchableText = [
+      card.name,
+      card.desc,
+      card.type,
+      card.race,
+      card.attribute,
+      card.archetype,
+      card.id,
+      card.konami_id,
+      getPrimaryCardCode(card),
+      ...printings.flatMap(printing => [
+        printing.set_name,
+        printing.set_code,
+        printing.card_code,
+        printing.setName,
+        printing.code,
+        printing.rarity
+      ])
+    ].filter(Boolean).join(" ").toLowerCase();
+
+    return terms.every(term => searchableText.includes(term));
+  }).sort((a, b) => {
+    const getNameMatchScore = card => {
+      if (!normalizedQuery) return 0;
+      const name = String(card.name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (name === normalizedQuery) return 3;
+      if (name.startsWith(normalizedQuery)) return 2;
+      return name.includes(normalizedQuery) ? 1 : 0;
+    };
+
+    return getNameMatchScore(b) - getNameMatchScore(a) ||
+      String(a.name || "").localeCompare(String(b.name || ""));
   });
 
-  const filteredGroups = [...groups.values()].filter(variants => variants.some(card =>
-    card.name.toLowerCase().includes(q) ||
-    card.cardCode.toLowerCase().includes(q) ||
-    card.variantTitle.toLowerCase().includes(q) ||
-    card.rarity.toLowerCase().includes(q) ||
-    card.tags.toLowerCase().includes(q)
-  )).slice(0, MAX_CARD_RESULTS);
+  const visibleCards = matchingCards.slice(0, cardVisibleCount);
+  if (summary) {
+    summary.textContent = matchingCards.length
+      ? `Showing ${visibleCards.length.toLocaleString()} of ${matchingCards.length.toLocaleString()} cards`
+      : "No cards match the selected search and filters.";
+  }
 
-  grid.innerHTML = filteredGroups.map(variants => {
-    const card = variants[0];
-    const cardImage = card.image || getCardImageUrl(card) ||
-      getStoredCardImage(card.name) || variants.find(variant => variant.image)?.image || "";
-    const textSource = variants.find(variant =>
-      String(variant.cardText || variant.desc || "").trim()
-    ) || localCardDatabase.find(localCard =>
-      String(localCard.name || "").trim().toLowerCase() ===
-      String(card.name || "").trim().toLowerCase()
-    );
-    const tooltipCard = textSource && !card.cardText
-      ? { ...card, cardText: textSource.cardText || textSource.desc || "" }
-      : card;
-    const sourceGroups = new Map();
-    variants.forEach(variant => {
-      const sourceName = variant.sourceName || "TCG Corner";
-      if (!sourceGroups.has(sourceName)) sourceGroups.set(sourceName, []);
-      sourceGroups.get(sourceName).push(variant);
-    });
-    const sourceControls = ["TCG Corner", "Players Club"]
-      .map(sourceName => {
-        const sourceVariants = sourceGroups.get(sourceName) || [];
-        const sourceId = sourceName === "TCG Corner" ? "tcg" : "playersclub";
-        const rarityOptions = [...new Map(
-          sourceVariants.map(variant => [variant.rarity, variant])
-        ).values()];
-        const firstVariant = sourceVariants[0];
-        const disabled = !firstVariant;
+  grid.innerHTML = visibleCards.map(card => {
+    const imageUrl = getCardImageUrl(card);
+    const cardCode = getPrimaryCardCode(card);
+    const metadata = [card.type, card.attribute, card.race]
+      .filter(Boolean)
+      .join(" · ");
 
-        return `
-          <div class="price-source-control">
-            <label class="label">${escapeHtml(sourceName)} rarity
-              <select class="source-rarity-select" data-source="${sourceId}" onchange="updateCardSource(this)" ${disabled ? "disabled" : ""}>
-                ${disabled
-                  ? `<option>No price data available</option>`
-                  : rarityOptions.map(variant => `<option value="${escapeHtml(variant.id)}">${escapeHtml(variant.rarity)} · ${money(variant.price)}</option>`).join("")}
-              </select>
-            </label>
-            <div class="source-price" data-source-price="${sourceId}">${firstVariant ? money(firstVariant.price) : "No price data"}</div>
-            <button class="btn primary card-purchase" data-card-id="${escapeHtml(firstVariant?.id || "")}" data-source="${sourceId}" onclick="openPurchaseFor(this.dataset.cardId)" ${disabled ? "disabled" : ""}>Add ${escapeHtml(sourceName)} Purchase</button>
-          </div>
-        `;
-      }).join("");
-
-    return `<div class="card card-item">
-      <div class="card-image">
-      ${
-          cardImage
-            ? `
-                <img
-                  src="${escapeHtml(cardImage)}"
-                  alt="${escapeHtml(card.name)}"
-                  ${cardTooltipAttributes(tooltipCard, card.rarity)}
-                  style="width:100%;height:100%;object-fit:contain;"
-                >
-              `
-            : "No image"
-        }
+    return `<article class="card card-catalog-item">
+      <div class="card-image card-catalog-image">
+        ${getCardImageMarkup(
+          card,
+          imageUrl,
+          card.name
+        )}
       </div>
-      <div class="card-info">
+      <div class="deck-list-tooltip card-catalog-tooltip">
+        <strong>${escapeHtml(card.name || "Unknown card")}</strong>
+        <small>${escapeHtml([cardCode, card.rarity].filter(Boolean).join(" · ") || card.type || "Card")}</small>
+        <div class="deck-list-tooltip-label">Card text</div>
+        <p>${escapeHtml(getCardDescription(card))}</p>
+      </div>
+      <div class="card-catalog-info">
         <strong>${escapeHtml(card.name)}</strong>
-        <small>${escapeHtml(card.cardCode)}</small>
-        <div class="source-price-controls">${sourceControls}</div>
-        <div style="margin-top:6px;" class="label card-stock">${card.available ? "In stock" : "Out of stock"}</div>
-        ${card.url ? `<div class="row-actions"><a class="btn card-view" href="${escapeHtml(card.url)}" target="_blank" rel="noopener">View</a></div>` : ""}
+        <small>${escapeHtml(metadata || "Card details unavailable")}</small>
+        ${cardCode ? `<small class="card-catalog-code">${escapeHtml(cardCode)}</small>` : ""}
+        <button type="button" class="btn primary card-catalog-details" data-card-id="${escapeHtml(card.id)}">View details</button>
       </div>
-    </div>`;
-  }).join("") || `<div class="card empty" style="grid-column:1/-1;">No matching Yu-Gi-Oh products found.</div>`;
+    </article>`;
+  }).join("") || `<div class="card empty" style="grid-column:1/-1;">No cards match the selected search and filters.</div>`;
+
+  grid.querySelectorAll(".card-catalog-details").forEach(button => {
+    button.addEventListener("click", () => {
+      const card = localCardDatabase.find(item => String(item.id) === button.dataset.cardId);
+      if (card) showCardDetails(card);
+    });
+  });
+  bindCardImageFallbacks(grid);
+
+  if (loadMore) {
+    loadMore.hidden = visibleCards.length >= matchingCards.length;
+    loadMore.textContent = `Show more cards (${Math.min(MAX_CARD_RESULTS, matchingCards.length - visibleCards.length).toLocaleString()})`;
+  }
 }
 
 function updateCardSource(select) {
@@ -3073,9 +4143,10 @@ function finishTCGProductLoad(products, shouldCache = true) {
 
 async function syncTCGCorner() {
   const button = document.getElementById("syncTCGButton");
+  const label = button?.querySelector("span");
   if (button) {
     button.disabled = true;
-    button.textContent = "Sync started";
+    if (label) label.textContent = "Sync started";
   }
 
   const refresh = loadTCGProducts(true, true);
@@ -3083,7 +4154,7 @@ async function syncTCGCorner() {
   void Promise.race([refresh, handoff]).finally(() => {
     if (button) {
       button.disabled = false;
-      button.textContent = "Sync TCG Corner";
+      if (label) label.textContent = "Sync TCG Corner";
     }
   });
 }
@@ -3253,6 +4324,7 @@ function showBanlistPopup(title, message) {
   popupMessage.textContent = message;
 
   popup.classList.add("show");
+  document.getElementById("banlistPopupClose")?.focus();
 }
 
 
@@ -3396,13 +4468,14 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 });
 
-function cardTooltipAttributes(card, rarity = "") {
+function cardTooltipAttributes(card, rarity = "", code = "", price) {
+  const tooltipPrice = price === undefined ? card?.price || 0 : price;
   return `
     data-tooltip-name="${escapeHtml(card?.name || "")}"
-    data-tooltip-code="${escapeHtml(card?.cardCode || "")}"
+    data-tooltip-code="${escapeHtml(code || card?.cardCode || getPrimaryCardCode(card) || "")}"
     data-tooltip-rarity="${escapeHtml(rarity || card?.rarity || "")}"
-    data-tooltip-price="${escapeHtml(String(card?.price || 0))}"
-    data-tooltip-text="${escapeHtml("<strong>Card Text:</strong>" + getCardDescription(card))}"
+    data-tooltip-price="${escapeHtml(tooltipPrice === null ? "" : String(tooltipPrice))}"
+    data-tooltip-text="${escapeHtml(getCardDescription(card))}"
   `;
 }
 
@@ -3416,15 +4489,30 @@ document.addEventListener("mouseover", event => {
 
   const tooltip = document.createElement("div");
   tooltip.className = "card-hover-tooltip";
-  tooltip.innerHTML = `
-    <strong>${image.dataset.tooltipName}</strong>
-    <small>
-      ${image.dataset.tooltipCode}
-      · ${image.dataset.tooltipRarity}
-      · ${formatPrice(image.dataset.tooltipPrice)}
-    </small>
-    <p>${image.dataset.tooltipText}</p>
-  `;
+  const tooltipMetadata = [
+    image.dataset.tooltipCode,
+    image.dataset.tooltipRarity,
+    image.dataset.tooltipPrice
+      ? formatPrice(image.dataset.tooltipPrice)
+      : ""
+  ].filter(Boolean).join(" · ");
+  const title = document.createElement("strong");
+  title.textContent = image.dataset.tooltipName || "";
+  tooltip.appendChild(title);
+
+  if (tooltipMetadata) {
+    const metadata = document.createElement("small");
+    metadata.textContent = tooltipMetadata;
+    tooltip.appendChild(metadata);
+  }
+
+  const description = document.createElement("p");
+  const label = document.createElement("strong");
+  label.textContent = "Card Text:";
+  description.append(label, document.createTextNode(
+    `\n${image.dataset.tooltipText || ""}`
+  ));
+  tooltip.appendChild(description);
 
   document.body.appendChild(tooltip);
   activeCardTooltip = tooltip;
@@ -3467,8 +4555,7 @@ function addMarketplaceListing(card, quantity, price, set, rarity) {
 }
 
 function getMarketplaceImage(card, listingImage = "") {
-  if (listingImage) return listingImage;
-  return getCardImageUrl(card) || getStoredCardImage(card?.name) || "";
+  return getCardImageWithFallback(card, listingImage);
 }
 
 function getStoredCardImage(cardName) {
@@ -3501,15 +4588,12 @@ function renderMarketplaceListings() {
 
     if (!card) return "";
     
-    const image = getMarketplaceImage(card, listing.image);
     const quantity = Number(listing.quantity ?? listing.qty ?? 1);
     const price = Number(listing.price || 0);
 
     return `
       <article class="card marketplace-listing">
-        ${image
-          ? `<img src="${escapeHtml(image)}" alt="${escapeHtml(card.name)}" ${cardTooltipAttributes(card, listing.rarity)}>`
-          : `<div class="card-image">No image</div>`}
+        ${getCardImageMarkup(card, listing.image || getMarketplaceImage(card), card.name, "", cardTooltipAttributes(card, listing.rarity))}
 
         <div class="card-info">
           <strong>${escapeHtml(card.name)}</strong>
@@ -3531,6 +4615,7 @@ function renderMarketplaceListings() {
       </article>
     `;
   }).join("") || `<p class="empty">No cards listed for sale.</p>`;
+  bindCardImageFallbacks(container);
 }
 
 document
@@ -3596,6 +4681,7 @@ function openMarketplace(cardId) {
   updateMarketplaceRarities(card);
 
   modal.classList.add("open");
+  setTimeout(() => document.getElementById("marketplaceSet")?.focus(), 0);
 }
 
 function updateMarketplaceRarities(card) {
@@ -3782,103 +4868,47 @@ async function refreshDeckPrices() {
   renderDecks();
 }
 
-let detailSelectedCard = null;
-
-function populateDetailSetOptions(card) {
-  detailSelectedCard = card;
-
-  const setSelect = document.getElementById("detailCardSetSelect");
-  const raritySelect = document.getElementById("detailCardRaritySelect");
-  const setDisplay = document.getElementById("detailCardSet");
-
-  if (!setSelect || !raritySelect) return;
-
-  const printings = getCardPrintings(card);
-
-  const sets = [...new Map(
-    printings.map(printing => [
-      `${printing.region}:${printing.set}`,
-      printing
-    ])
-  ).values()];
-
-  setSelect.innerHTML = sets.map(printing => `
-        <option value="${escapeHtml(`${printing.region}|${printing.set}`)}"
-          data-set="${escapeHtml(printing.set)}"
-            data-region="${escapeHtml(printing.region)}">
-      ${escapeHtml(printing.set)}
-    </option>
-  `).join("");
-
-  setDisplay.innerHTML = sets.map(printing => `
-    <div>
-      ${escapeHtml(printing.setName || printing.set)}
-      (${escapeHtml(printing.code)}) —
-      ${escapeHtml(printing.region)}
-    </div>
-  `).join("");
-
-  updateDetailRarityOptions();
-}
-
-function updateDetailRarityOptions() {
-  const setSelect = document.getElementById("detailCardSetSelect");
-  const raritySelect = document.getElementById("detailCardRaritySelect");
-
-  if (!setSelect || !raritySelect || !detailSelectedCard) return;
-
-  const selectedOption = setSelect.options[setSelect.selectedIndex];
-  const selectedSet = selectedOption?.dataset.set || "";
-  const selectedRegion = selectedOption?.dataset.region || "TCG";
-
-  const rarities = [...new Set(
-    getCardPrintings(detailSelectedCard)
-      .filter(printing =>
-        printing.set === selectedSet &&
-        printing.region === selectedRegion
-      )
-      .map(printing => printing.rarity || "")
-  )];
-
-  raritySelect.innerHTML = rarities.length
-    ? rarities.map(rarity => {
-        const tcgCode = getTcgCornerRarity(rarity);
-
-        return `
-          <option value="${escapeHtml(rarity)}"
-                  data-tcg-rarity="${escapeHtml(tcgCode)}"
-                  title="${escapeHtml(rarity)}">
-            ${escapeHtml(tcgCode || "Unknown rarity")}
-          </option>`;
-      }).join("")
-    : `<option value="">No rarity available</option>`;
-}
-
-document
-  .getElementById("detailCardSetSelect")
-  ?.addEventListener("change", updateDetailRarityOptions);
-
 document
   .getElementById("addDetailCardToDeck")
-  ?.addEventListener("click", () => {
-    if (!detailSelectedCard) return;
+  ?.addEventListener("click", event => {
+    event.preventDefault();
 
-    const deckName = activeDeck || decks[0];
-    if (!deckName) {
-      showAppAlert("Create or select a deck first.");
+    const panel = document.getElementById("cardDetailsPanel");
+    const card = localCardDatabase.find(
+      item => String(item.id) === String(panel?.dataset.cardId)
+    );
+    if (!card) {
+      showAppAlert("Card details are not ready yet. Please try again.");
+      return;
+    }
+
+    const destination = document.getElementById("detailCardDeckSelect")?.value || "";
+    const deckName = destination.startsWith("Deck: ")
+      ? destination.slice("Deck: ".length)
+      : "";
+    if (!decks.includes(deckName)) {
+      showAppAlert(decks.length ? "Select the deck you want to add this card to." : "Create a deck before adding cards.");
       return;
     }
 
     const setSelect = document.getElementById("detailCardSetSelect");
     const raritySelect = document.getElementById("detailCardRaritySelect");
-    const quantity = Number(
-      document.getElementById("detailCardQuantity").value) || 1;
-    const selectedOption = setSelect.options[setSelect.selectedIndex];
+    const quantityInput = document.getElementById("detailCardQuantity");
+    const selectedOption = setSelect?.selectedOptions?.[0];
+    if (!selectedOption || !raritySelect?.value) {
+      showAppAlert("Select a valid set and rarity.");
+      return;
+    }
+
+    const quantity = Math.min(
+      3,
+      Math.max(1, Math.floor(Number(quantityInput?.value) || 1))
+    );
     const region = selectedOption?.dataset.region || "TCG";
     const selectedSet = selectedOption?.dataset.set || "";
     const selectedRarity = raritySelect.value;
 
-    const printing = getCardPrintings(detailSelectedCard).find(item =>
+    const printing = getCardPrintings(card).find(item =>
       item.set === selectedSet &&
       item.region === region &&
       item.rarity === selectedRarity
@@ -3889,9 +4919,9 @@ document
       return;
     }
 
-    addCardEntryToDeck(
+    const added = addCardEntryToDeck(
       deckName,
-      detailSelectedCard,
+      card,
       quantity,
       selectedRarity,
       getTcgCornerRarity(selectedRarity),
@@ -3899,7 +4929,12 @@ document
       region
     );
 
+    if (added !== true) return;
+
+    activeDeck = deckName;
+    cardDetailsSelectedDeck = deckName;
     saveData();
+    closeCardDetails();
     renderDecks();
   });
 
@@ -3939,9 +4974,7 @@ function renderMarketplaceCards() {
 
     return `
       <article class="card marketplace-card">
-        ${image
-          ? `<img loading="lazy" decoding="async" src="${escapeHtml(image)}" alt="${escapeHtml(card.name || "")}" >`
-          : `<div class="card-image">No image</div>`}
+        ${getCardImageMarkup(card, image, card.name || "Unknown card")}
 
         <h3>${escapeHtml(card.name || "Unknown card")}</h3>
 
@@ -3953,6 +4986,7 @@ function renderMarketplaceCards() {
       </article>
     `;
   }).join("") || "<p>No cards found.</p>";
+  bindCardImageFallbacks(grid);
 }
 
 document.getElementById("marketCardSearch")
@@ -3994,6 +5028,7 @@ document.addEventListener("keydown", event => {
 
 loadLocalCardDatabase()
   .then(() => {
+    populateCardFilters();
     renderDashboard();
     renderCollection();
     renderSpending();
@@ -4001,7 +5036,10 @@ loadLocalCardDatabase()
     renderCards();
     loadTCGProducts();
   })
-  .catch(error => console.error(error));
+  .catch(error => {
+    console.error(error);
+    renderCards();
+  });
 
 loadBanlists().then(() => {
   setActiveBanlist(activeBanlist || "AE");

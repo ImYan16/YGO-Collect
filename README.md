@@ -33,6 +33,12 @@ Card information includes:
 * Language and region information
 * Card images
 
+The Cards page searches card names, effects, codes, archetypes, and set details. It also filters by card type, attribute, and monster type. Open a card to view its text and printings. Card rulings have a separate page and are fetched from the YGOResources API only after selecting a card; additional Q&A records load in small batches. Ruling lookup requires an internet connection, while the local card catalog remains available without it.
+
+The Rulings page presents the selected card's details and artwork alongside its related FAQ and Q&A entries. Card catalog hover previews use the enlarged tile and card-text tooltip used by active deck cards.
+
+Spending, collection, and marketplace card thumbnails reuse images from the local card catalog when a product image is missing or fails to load.
+
 The project uses JSON data so the application does not need to request card information from an external API every time you use it.
 
 ### Deck Builder
@@ -56,7 +62,7 @@ The application checks card limits against the selected banlist when cards are a
 
 Track purchases made for your collection.
 
-Purchase records support card information, quantities, rarity, set information, source, and pricing.
+Purchase records support card information, quantities, rarity, set information, source, and pricing. Spending history identifies whether each recorded price came from TCG Corner or Players Club.
 
 The application is designed to support multiple pricing sources instead of relying on a single marketplace.
 
@@ -92,6 +98,10 @@ Cards are assigned a copy limit based on their status:
 * Unlimited: 3 copies
 
 The selected banlist determines the limits used by the deck builder.
+
+The `Update Official Banlists` GitHub Actions workflow refreshes TCG, Asian-English, and OCG restrictions from the official Neuron pages each day and can also be run manually. OCG's Japanese card IDs are matched to English catalog names before updating `data/banlists.json`.
+
+The `Update Card Data` workflow checks the current year's Yugipedia release calendar daily, imports released TCG-EN and OCG-AE set-list metadata, and enriches matching card records from the YGOPRODeck API. It updates `data/cards.json`, `data/tcg.json`, and `data/ae.json`; future-dated releases are skipped, and unmatched cards are reported for the next scheduled retry rather than being added with incomplete card data.
 
 ## Project Structure
 
@@ -169,9 +179,12 @@ These include:
 * YGOPRODeck
 * Yugipedia
 * TCG Corner
-* Players Club (to be added further on the development)
+* Players Club
+* YGOResources (card rulings)
 
 Different sources serve different purposes. Card information, regional printings, set information, and pricing data are handled separately where possible.
+
+Card rulings are retrieved on demand from the [YGOResources API](https://db.ygoresources.com/about/api). The app loads the card-name index on the first ruling lookup, then fetches the selected card and its Q&A entries as needed.
 
 The project does not claim ownership of Yu-Gi-Oh! card names, artwork, trademarks, or other copyrighted material belonging to their respective owners.
 
