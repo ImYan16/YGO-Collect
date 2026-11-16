@@ -1,0 +1,34 @@
+name: Update Official Banlists
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 8 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update-banlists:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Test Perl updater parsers
+        run: perl Tools/test_update_data.pl
+
+      - name: Update official banlists
+        run: perl Tools/update_banlists.pl
+
+      - name: Commit updated banlists
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/banlists.json
+          if git diff --cached --quiet; then
+            echo "No banlist changes to commit"
+          else
+            git commit -m "Update official banlists"
+            git push
+          fi

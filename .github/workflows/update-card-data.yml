@@ -1,0 +1,34 @@
+name: Update Card Data
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 8 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update-card-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Test Perl updater parsers
+        run: perl Tools/test_update_data.pl
+
+      - name: Update released card data
+        run: perl Tools/update_card_data.pl
+
+      - name: Commit updated card data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/cards.json data/tcg.json data/ae.json
+          if git diff --cached --quiet; then
+            echo "No released card data changes to commit"
+          else
+            git commit -m "Update released card data"
+            git push
+          fi
