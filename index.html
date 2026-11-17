@@ -706,6 +706,18 @@
               <button type="button" class="btn" id="addCardDetailsPurchase" onclick="addCardDetailsPurchase()">Add a purchase</button>
             </section>
 
+            <section class="card-details-section" aria-labelledby="cardDetailsBinderTitle">
+              <h3 id="cardDetailsBinderTitle">Add to binder</h3>
+              <p class="card-details-note">Add one copy without purchase details.</p>
+              <div class="add-to-binder-controls">
+                <label for="cardDetailsBinderSelect">Binder
+                  <select id="cardDetailsBinderSelect"></select>
+                </label>
+                <button type="button" class="btn primary" onclick="addCardDetailsToBinder()">Add one copy</button>
+              </div>
+              <p id="cardDetailsBinderAddNote" class="card-details-note" aria-live="polite"></p>
+            </section>
+
             <section class="card-details-section" aria-labelledby="cardDetailsWishlistTitle">
               <h3 id="cardDetailsWishlistTitle">Wishlist</h3>
               <button type="button" class="btn" id="toggleCardWishlist" aria-pressed="false" onclick="toggleCardWishlist()">Add to wishlist</button>

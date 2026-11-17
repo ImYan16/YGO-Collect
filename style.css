@@ -4588,6 +4588,39 @@ table tbody tr:hover {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.add-to-binder-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.add-to-binder-controls label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.add-to-binder-controls select {
+  width: 100%;
+  min-width: 0;
+}
+
+.add-to-binder-controls button {
+  min-height: 42px;
+}
+
+@media (max-width: 420px) {
+  .add-to-binder-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .add-to-binder-controls button {
+    width: 100%;
+  }
+}
+
 @media (max-width: 680px) {
   .card-details-facts > div {
     padding: 10px;

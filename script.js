@@ -1154,6 +1154,19 @@ function populateCardDetailsDeckOptions() {
   };
 }
 
+function populateCardDetailsBinderOptions() {
+  const select = document.getElementById("cardDetailsBinderSelect");
+  if (!select) return;
+
+  const selectedBinderId = binders.some(binder => binder.id === activeBinderId)
+    ? activeBinderId
+    : DEFAULT_BINDER_ID;
+  select.innerHTML = binders.map(binder =>
+    `<option value="${escapeHtml(binder.id)}">${escapeHtml(binder.name)}</option>`
+  ).join("");
+  select.value = selectedBinderId;
+}
+
 function addDeck() {
   document.getElementById("deckNameInput").value = "";
   document.getElementById("deckModal").classList.add("open");
@@ -2364,6 +2377,8 @@ async function showCardDetails(card) {
   if (renderToken !== cardDetailsRenderToken) return;
 
   populateCardDetailsDeckOptions();
+  populateCardDetailsBinderOptions();
+  document.getElementById("cardDetailsBinderAddNote").textContent = "";
   const printings = getCardPrintings(card);
   const detailsDisclosure = document.querySelector(".card-details-slot");
   if (detailsDisclosure) detailsDisclosure.open = false;
@@ -3674,6 +3689,86 @@ function addCardDetailsPurchase() {
   openPurchaseFor(purchaseCard.id);
 }
 
+function addCardDetailsToBinder() {
+  const panel = document.getElementById("cardDetailsPanel");
+  const card = localCardDatabase.find(
+    item => String(item.id) === String(panel?.dataset.cardId || "")
+  );
+  if (!card) {
+    showAppAlert("Card details are not ready yet. Please try again.");
+    return;
+  }
+
+  const binderId = document.getElementById("cardDetailsBinderSelect")?.value;
+  const binder = binders.find(item => item.id === binderId);
+  if (!binder) {
+    showAppAlert("Select a valid binder before adding this card.");
+    return;
+  }
+
+  const setOption = document.getElementById("detailCardSetSelect")?.selectedOptions?.[0];
+  const set = setOption?.dataset.set ||
+    getSetCode(card.cardCode) ||
+    card.cardCode ||
+    "Unknown set";
+  const rarity = document.getElementById("detailCardRaritySelect")?.value ||
+    card.rarity ||
+    "Unknown rarity";
+  const destination = getBinderDestination(binder.id);
+  const now = new Date();
+  const date = new Date(
+    now.getTime() - now.getTimezoneOffset() * 60000
+  ).toISOString().slice(0, 10);
+  const purchase = {
+    id: Date.now(),
+    cardId: card.id,
+    card: card.name,
+    image: getCardImageWithFallback(card),
+    sourceName: "Card details",
+    acquisitionType: "binder",
+    printing: `${set} · ${rarity}`,
+    set,
+    rarity,
+    destination,
+    binderId: binder.id,
+    copyBinderIds: [binder.id],
+    copyDestinations: [destination],
+    deckQuantityAdded: 0,
+    qty: 1,
+    price: 0,
+    total: 0,
+    date,
+    seller: "—"
+  };
+  const savedPurchases = localStorage.getItem("ygoPurchases");
+  purchases.unshift(purchase);
+  try {
+    saveData();
+  } catch (error) {
+    purchases.shift();
+    try {
+      if (savedPurchases === null) {
+        localStorage.removeItem("ygoPurchases");
+      } else {
+        localStorage.setItem("ygoPurchases", savedPurchases);
+      }
+    } catch (restoreError) {
+      console.error("Unable to restore collection storage after a failed binder add:", restoreError);
+    }
+    console.error("Unable to add a card to a binder:", error);
+    showAppAlert("The card could not be added to the binder. Check available browser storage and try again.");
+    return;
+  }
+
+  renderDashboard();
+  renderCollection();
+  renderSpending();
+  renderDecks();
+  renderCardDetailsInventory(card);
+  document.getElementById("cardDetailsBinderAddNote").textContent =
+    `Added one copy to ${binder.name}. No purchase cost was recorded.`;
+}
+
 document.getElementById("cardDetailsCopies")
   ?.addEventListener("click", event => {
     const button = event.target.closest("[data-remove-copy]");
@@ -3850,22 +3945,28 @@ function getCollectionCardType(card) {
   return type ? "Other" : "Unknown";
 }
 
+function getSpendingPurchases() {
+  return purchases.filter(purchase => purchase.acquisitionType !== "binder");
+}
+
 function renderDashboard() {
   const rows = collectionRows();
   const value = rows.reduce((s,r) => s + r.qty * (cards.find(c=>String(c.id)===String(r.cardId))?.price || 0),0);
-  const spent = purchases.reduce((s,p)=>s+p.total,0);
+  const spendingPurchases = getSpendingPurchases();
+  const spent = spendingPurchases.reduce((s,p)=>s+p.total,0);
   document.getElementById("dashValue").textContent = money(value);
   document.getElementById("dashSpent").textContent = money(spent);
   document.getElementById("dashGain").textContent = money(value-spent);
   document.getElementById("dashCards").textContent = rows.reduce((s,r)=>s + Number(r.qty || 0), 0);
   const now = new Date();
-  const month = purchases.filter(p => {
+  const month = spendingPurchases.filter(p => {
     const d = new Date(p.date);
     return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
   }).reduce((s,p)=>s+p.total,0);
   document.getElementById("monthSpent").textContent = money(month);
-  document.getElementById("avgPurchase").textContent = money(purchases.length ? spent/purchases.length : 0);
-  document.getElementById("recentPurchases").innerHTML = purchases.slice(0,5).map(p =>
+  document.getElementById("avgPurchase").textContent =
+    money(spendingPurchases.length ? spent / spendingPurchases.length : 0);
+  document.getElementById("recentPurchases").innerHTML = spendingPurchases.slice(0,5).map(p =>
     (() => {
       const marketPrice = cards.find(card => String(card.id) === String(p.cardId))?.price || 0;
       const gain = marketPrice * Number(p.qty || 0) - p.total;
@@ -4257,17 +4358,19 @@ function updateSpendingPurchase(select) {
 }
 
 function renderSpending() {
-  const total = purchases.reduce((s,p)=>s+p.total,0);
+  const spendingPurchases = getSpendingPurchases();
+  const total = spendingPurchases.reduce((s,p)=>s+p.total,0);
   const now = new Date();
-  const month = purchases.filter(p => {
+  const month = spendingPurchases.filter(p => {
     const d = new Date(p.date);
     return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
   }).reduce((s,p)=>s+p.total,0);
   document.getElementById("spentTotal").textContent = money(total);
   document.getElementById("spentMonth").textContent = money(month);
-  document.getElementById("purchaseCount").textContent = purchases.length;
-  document.getElementById("purchaseAverage").textContent = money(purchases.length ? total/purchases.length : 0);
-  document.getElementById("purchaseTable").innerHTML = purchases.map(p =>
+  document.getElementById("purchaseCount").textContent = spendingPurchases.length;
+  document.getElementById("purchaseAverage").textContent =
+    money(spendingPurchases.length ? total / spendingPurchases.length : 0);
+  document.getElementById("purchaseTable").innerHTML = spendingPurchases.map(p =>
     (() => {
       const marketPrice = cards.find(card => String(card.id) === String(p.cardId))?.price || 0;
       const card = cards.find(item => String(item.id) === String(p.cardId)) ||
