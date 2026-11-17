@@ -18,6 +18,7 @@ our @EXPORT_OK = qw(
 );
 
 my $USER_AGENT = 'YGO-Collect updater/1.0 (https://github.com/ImYan16/YGO-Collect)';
+my $GITHUB_JSON_FILE_LIMIT = 100 * 1024 * 1024;
 my @JSON_KEY_ORDER = qw(
   source region data id name typeline type humanReadableCardType frameType desc race
   atk def level
@@ -69,7 +70,10 @@ sub fetch_json {
 }
 
 sub write_json {
-  my ($path, $value) = @_;
+  my ($path, $value, $compact) = @_;
+  my $compact_serialized = $compact
+    ? $JSON_ENCODER->encode($value) . "\n"
+    : undef;
   if (-e $path) {
     open my $existing_file, '<:raw', $path
       or die "Unable to read $path before updating: $!\n";
@@ -80,11 +84,20 @@ sub write_json {
     my $existing = eval { decode_json($existing_json) };
     if (!$@) {
       my $comparer = JSON::PP->new->utf8->canonical;
-      return if $comparer->encode($existing) eq $comparer->encode($value);
+      if ($comparer->encode($existing) eq $comparer->encode($value)) {
+        return if $compact && $existing_json eq $compact_serialized;
+        return if !$compact && length($existing_json) < $GITHUB_JSON_FILE_LIMIT;
+      }
     }
   }
   my $temporary_path = "$path.tmp";
-  my $serialized = _encode_pretty_json($value, 0) . "\n";
+  my $serialized = $compact_serialized || _encode_pretty_json($value, 0) . "\n";
+  if (length($serialized) >= $GITHUB_JSON_FILE_LIMIT) {
+    $compact_serialized ||= $JSON_ENCODER->encode($value) . "\n";
+    $serialized = $compact_serialized;
+  }
+  die "Generated JSON for $path exceeds GitHub's 100 MiB file limit even when compacted\n"
+    if length($serialized) >= $GITHUB_JSON_FILE_LIMIT;
 
   open my $file, '>:raw', $temporary_path
     or die "Unable to write $temporary_path: $!\n";

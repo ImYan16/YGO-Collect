@@ -20,12 +20,14 @@ my $ROOT = "$RealBin/..";
 my $CARDS_PATH = "$ROOT/data/cards.json";
 my $TCG_PATH = "$ROOT/data/tcg.json";
 my $AE_PATH = "$ROOT/data/ae.json";
+my $OCG_PATH = "$ROOT/data/ocg.json";
 my $YGOPRODECK_URL = 'https://db.ygoprodeck.com/api/v7/cardinfo.php?misc=yes';
 
 sub clean_card_name {
   my ($name) = @_;
   $name = trim($name);
   $name =~ s/\s*\(updated from:.*\)\s*$//i;
+  $name =~ s/\s*\(extended art\)\s*$//i;
   $name = trim($name);
   if (length($name) >= 2 && $name =~ /^(["\x{201c}\x{201d}])(.*)\1$/s) {
     $name = trim($2);
@@ -59,7 +61,7 @@ sub calendar_product_urls {
         my $release_position = index($text, 'release date');
         next if $release_position < 0;
         my $prefix = substr($text, 0, $release_position);
-        next unless $prefix =~ /north american|european|oceanic|asian-english|english/;
+        next unless $prefix =~ /north american|european|oceanic|asian-english|japanese|english/;
 
         for my $link (@{$item->{links}}) {
           my $absolute = urljoin($base_url, $link->[0]);
@@ -89,7 +91,7 @@ sub set_list_urls {
     } elsif ($event->{type} eq 'end' && $event->{tag} eq 'a' && $anchor) {
       my $href = unquote($anchor->{href});
       if (index($href, 'Set_Card_Lists:') >= 0 &&
-          ($href =~ /\(TCG-EN\)/ || $href =~ /\(OCG-AE\)/)) {
+          ($href =~ /\(TCG-EN\)/ || $href =~ /\(OCG-AE\)/ || $href =~ /\(OCG-JP\)/)) {
         my $absolute = urljoin($product_url, $anchor->{href});
         my @parts = urlsplit($absolute);
         my $host = $parts[1];
@@ -108,6 +110,7 @@ sub list_region {
   $path = unquote($path);
   return 'TCG' if $path =~ /\(TCG-EN\)$/;
   return 'AE' if $path =~ /\(OCG-AE\)$/;
+  return 'OCG' if $path =~ /\(OCG-JP\)$/;
   die "Unsupported Yugipedia card-list URL: $url\n";
 }
 
@@ -118,7 +121,7 @@ sub list_set_name {
   my ($title) = $path =~ m{/([^/]+)$};
   $title = unquote($title || '');
   $title =~ tr/_/ /;
-  my ($name) = $title =~ /^Set Card Lists:\s*(.*?)\s+\((?:TCG-EN|OCG-AE)\)$/i;
+  my ($name) = $title =~ /^Set Card Lists:\s*(.*?)\s+\((?:TCG-EN|OCG-AE|OCG-JP)\)$/i;
   die "Could not determine set name from $url\n" unless defined $name;
   return trim($name);
 }
@@ -136,6 +139,8 @@ sub parse_release_date {
     '%B %d, %Y',
     '%b %d, %Y',
     '%Y-%m-%d',
+    '%B %Y',
+    '%b %Y',
   ) {
     my $date = eval { Time::Piece->strptime($value, $format) };
     return $date->strftime('%Y-%m-%d') if $date;
@@ -148,6 +153,12 @@ sub _cell_text {
   return trim($cell->{text});
 }
 
+sub _cell_values {
+  my ($cell) = @_;
+  return @{$cell->{links}} if @{$cell->{links}};
+  return grep { length } map { trim($_) } split /\n+/, $cell->{text};
+}
+
 sub parse_card_rows {
   my ($page, $set_name) = @_;
   my (@rows, $row, $cell, $anchor);
@@ -158,11 +169,11 @@ sub parse_card_rows {
       if ($tag eq 'tr') {
         $row = [];
       } elsif (($tag eq 'td' || $tag eq 'th') && $row) {
-        $cell = { text => '', links => [] };
+        $cell = { tag => $tag, text => '', links => [] };
       } elsif ($tag eq 'a' && $cell) {
         $anchor = '';
       } elsif ($tag eq 'br' && $cell) {
-        $cell->{text} .= ' ';
+        $cell->{text} .= "\n";
       }
     } elsif ($event->{type} eq 'text') {
       $cell->{text} .= $event->{data} if $cell;
@@ -184,29 +195,73 @@ sub parse_card_rows {
   }
 
   my @result;
+  my %columns = (
+    code => 0,
+    name => 1,
+    rarity => 2,
+    category => 3,
+    print => undef,
+  );
+  my $has_rarity_header = 0;
   for my $cells (@rows) {
     next if @$cells < 2;
-    my $code = @{$cells->[0]{links}}
-      ? $cells->[0]{links}[0]
-      : _cell_text($cells->[0]);
-    next unless $code =~ /^[A-Z0-9]+(?:-[A-Z0-9]+)+$/i;
-    my $name = @{$cells->[1]{links}}
-      ? $cells->[1]{links}[0]
-      : _cell_text($cells->[1]);
+
+    if (grep { $_->{tag} eq 'th' } @$cells) {
+      %columns = (
+        code => 0,
+        name => 1,
+        rarity => 2,
+        category => 3,
+        print => undef,
+      );
+      $has_rarity_header = 0;
+      for my $index (0 .. $#$cells) {
+        my $header = lc(_cell_text($cells->[$index]));
+        $columns{code} = $index
+          if $header =~ /\b(?:card\s*(?:number|no\.?|code)|set\s*code|number|code)\b/;
+        $columns{name} = $index
+          if $header =~ /\benglish\s+name\b|\bcard\s+name\b|^name$/;
+        if ($header =~ /\brarity\b/) {
+          $columns{rarity} = $index;
+          $has_rarity_header = 1;
+        }
+        $columns{category} = $index if $header =~ /\bcategory\b/;
+        $columns{print} = $index if $header =~ /^\s*print\s*$/;
+      }
+      next;
+    }
+
+    my $code_index = $columns{code};
+    my $name_index = $columns{name};
+    next if $code_index > $#$cells || $name_index > $#$cells;
+    my @code_values = _cell_values($cells->[$code_index]);
+    my $code = @code_values ? $code_values[0] : _cell_text($cells->[$code_index]);
+    next unless $code =~ /^[A-Z0-9]+(?:\/[A-Z0-9]+)*(?:-[A-Z0-9]+)+$/i;
+    my @name_values = _cell_values($cells->[$name_index]);
+    my $name = @name_values ? $name_values[0] : _cell_text($cells->[$name_index]);
     $name = clean_card_name($name);
     next unless length $name;
 
     my (@rarity, @category);
-    if (@$cells > 2) {
-      @rarity = @{$cells->[2]{links}}
-        ? @{$cells->[2]{links}}
-        : (_cell_text($cells->[2]) ? (_cell_text($cells->[2])) : ());
+    my $rarity_index = $has_rarity_header
+      ? $columns{rarity}
+      : (@$cells > 4 ? 3 : 2);
+    $rarity_index = @$cells > 4 ? 3 : 2 if $rarity_index > $#$cells;
+    if ($rarity_index <= $#$cells) {
+      @rarity = _cell_values($cells->[$rarity_index]);
+      if (_cell_text($cells->[$name_index]) =~ /\bextended\s+art\b/i) {
+        @rarity = map { /^Extended Art\b/i ? $_ : "Extended Art $_" } @rarity;
+      }
     }
-    if (@$cells > 3) {
-      @category = @{$cells->[3]{links}}
-        ? @{$cells->[3]{links}}
-        : (_cell_text($cells->[3]) ? (_cell_text($cells->[3])) : ());
+    my $category_index = $columns{category};
+    $category_index = $rarity_index + 1
+      if !defined($category_index) || $category_index > $#$cells;
+    if ($category_index <= $#$cells) {
+      @category = _cell_values($cells->[$category_index]);
     }
+    my $print = defined($columns{print}) && $columns{print} <= $#$cells
+      ? _cell_text($cells->[$columns{print}])
+      : '';
     my (%seen_rarity, %seen_category);
     push @result, {
       set_name => $set_name,
@@ -214,8 +269,69 @@ sub parse_card_rows {
       card_name => $name,
       rarity => [grep { !$seen_rarity{$_}++ } @rarity],
       category => [grep { !$seen_category{$_}++ } @category],
-      print => '',
+      print => $print,
     };
+  }
+  return \@result;
+}
+
+sub _merge_printing_rows {
+  my ($previous, $incoming) = @_;
+  my %merged = (%$previous, %$incoming);
+  for my $field (qw(rarity category)) {
+    my (@values, %seen);
+    for my $row ($previous, $incoming) {
+      my $row_values = $row->{$field};
+      my @candidates = ref($row_values) eq 'ARRAY'
+        ? @$row_values
+        : defined($row_values) ? ($row_values) : ();
+      for my $value (@candidates) {
+        $value = trim($value);
+        push @values, $value if length($value) && !$seen{$value}++;
+      }
+    }
+    my $has_published_value = grep { lc($_) ne 'not applicable' } @values;
+    @values = grep { lc($_) ne 'not applicable' } @values if $has_published_value;
+    $merged{$field} = \@values if exists($previous->{$field}) || exists($incoming->{$field});
+  }
+  $merged{print} = $previous->{print} || $incoming->{print} || ''
+    if exists($previous->{print}) || exists($incoming->{print});
+  return \%merged;
+}
+
+sub _merge_scraped_printing_rows {
+  my ($previous, $incoming) = @_;
+  my $merged = _merge_printing_rows($previous, $incoming);
+  my $rarities = $incoming->{rarity};
+  if (ref($rarities) eq 'ARRAY' && @$rarities) {
+    my @rarities = map { trim($_) } @$rarities;
+    @rarities = grep { length($_) } @rarities;
+    my $has_published_rarity = grep { lc($_) ne 'not applicable' } @rarities;
+    @rarities = grep { lc($_) ne 'not applicable' } @rarities
+      if $has_published_rarity;
+    $merged->{rarity} = \@rarities if @rarities;
+  }
+  return $merged;
+}
+
+sub _printing_key {
+  my ($row) = @_;
+  return normalize_name($row->{set_name} || '') . '|' .
+    normalize_code($row->{card_code} || '');
+}
+
+sub deduplicate_printing_rows {
+  my ($rows) = @_;
+  my (@result, %index);
+  for my $row (@$rows) {
+    my $key = _printing_key($row);
+    if (!exists $index{$key}) {
+      $index{$key} = scalar @result;
+      push @result, { %$row };
+    } else {
+      my $position = $index{$key};
+      $result[$position] = _merge_printing_rows($result[$position], $row);
+    }
   }
   return \@result;
 }
@@ -235,9 +351,9 @@ sub fetch_released_sets {
     $list_urls{$_} = 1 for @{set_list_urls($product_html, $product_urls->[$index])};
   }
   my @list_urls = sort keys %list_urls;
-  die "No TCG-EN or OCG-AE card lists found for $year\n" unless @list_urls;
+  die "No supported regional card lists found for $year\n" unless @list_urls;
 
-  my $released = { TCG => [], AE => [] };
+  my $released = { TCG => [], AE => [], OCG => [] };
   for my $index (0 .. $#list_urls) {
     sleep(0.25) if $index;
     my $url = $list_urls[$index];
@@ -251,22 +367,14 @@ sub fetch_released_sets {
     push @{$released->{$region}}, @$rows;
   }
 
-  for my $region (qw(TCG AE)) {
-    my (%by_code, @deduplicated);
-    for my $row (@{$released->{$region}}) {
-      if (!exists $by_code{$row->{card_code}}) {
-        $by_code{$row->{card_code}} = scalar @deduplicated;
-        push @deduplicated, $row;
-      } else {
-        $deduplicated[$by_code{$row->{card_code}}] = $row;
-      }
-    }
-    $released->{$region} = \@deduplicated;
+  for my $region (qw(TCG AE OCG)) {
+    $released->{$region} = deduplicate_printing_rows($released->{$region});
   }
 
-  printf "Yugipedia %d: %d release pages, %d TCG/AE card lists, %d TCG printings, %d AE printings through %s\n",
+  printf "Yugipedia %d: %d release pages, %d regional card lists, %d TCG printings, %d AE printings, %d OCG printings through %s\n",
     $year, scalar(@$product_urls), scalar(@list_urls),
-    scalar(@{$released->{TCG}}), scalar(@{$released->{AE}}), $today;
+    scalar(@{$released->{TCG}}), scalar(@{$released->{AE}}),
+    scalar(@{$released->{OCG}}), $today;
   return $released;
 }
 
@@ -274,35 +382,184 @@ sub merge_ae_printings {
   my ($existing_document, $released_rows) = @_;
   my $existing_rows = $existing_document->{data};
   die "data/ae.json must contain a data array\n" unless ref($existing_rows) eq 'ARRAY';
+  my $scraped_rows = deduplicate_printing_rows($released_rows);
 
-  my (%by_code, @merged_rows);
+  my (%by_printing, @merged_rows);
   my %existing_names = map { normalize_name($_->{card_name}) => 1 } @$existing_rows;
   for my $row (@$existing_rows) {
-    my $code = uc($row->{card_code} || '');
-    my $index = $by_code{$code};
+    my $key = _printing_key($row);
+    my $index = $by_printing{$key};
     if (defined $index) {
-      $merged_rows[$index] = { %{$merged_rows[$index]}, %$row };
+      $merged_rows[$index] = _merge_printing_rows($merged_rows[$index], $row);
     } else {
-      $by_code{$code} = scalar @merged_rows;
+      $by_printing{$key} = scalar @merged_rows;
       push @merged_rows, { %$row };
     }
   }
-  for my $row (@$released_rows) {
-    my $code = uc($row->{card_code});
-    my $index = $by_code{$code};
+  for my $row (@$scraped_rows) {
+    my $key = _printing_key($row);
+    my $index = $by_printing{$key};
     if (defined $index) {
-      my $previous = $merged_rows[$index];
-      my %merged = (%$previous, %$row);
-      $merged{print} = $previous->{print} // $row->{print} // '';
-      $merged_rows[$index] = \%merged;
+      $merged_rows[$index] = _merge_scraped_printing_rows($merged_rows[$index], $row);
     } else {
       my %merged = %$row;
       $merged{print} = 'Reprint' if $existing_names{normalize_name($row->{card_name})};
-      $by_code{$code} = scalar @merged_rows;
+      $by_printing{$key} = scalar @merged_rows;
       push @merged_rows, \%merged;
     }
   }
   return { %$existing_document, data => \@merged_rows };
+}
+
+sub merge_ocg_printings {
+  my ($existing_document, $released_rows) = @_;
+  my $existing_rows = $existing_document->{data};
+  die "data/ocg.json must contain a data array\n" unless ref($existing_rows) eq 'ARRAY';
+  my $scraped_rows = deduplicate_printing_rows($released_rows);
+
+  my (%by_printing, @merged_rows);
+  for my $row (@$existing_rows) {
+    my %printing = map { exists($row->{$_}) ? ($_ => $row->{$_}) : () }
+      qw(set_name card_code card_name rarity);
+    my $key = _printing_key(\%printing);
+    my $index = $by_printing{$key};
+    if (defined $index) {
+      $merged_rows[$index] = _merge_printing_rows($merged_rows[$index], \%printing);
+    } else {
+      $by_printing{$key} = scalar @merged_rows;
+      push @merged_rows, \%printing;
+    }
+  }
+  for my $row (@$scraped_rows) {
+    my %printing = map { exists($row->{$_}) ? ($_ => $row->{$_}) : () }
+      qw(set_name card_code card_name rarity);
+    my $key = _printing_key(\%printing);
+    my $index = $by_printing{$key};
+    if (defined $index) {
+      $merged_rows[$index] = _merge_scraped_printing_rows($merged_rows[$index], \%printing);
+    } else {
+      $by_printing{$key} = scalar @merged_rows;
+      push @merged_rows, \%printing;
+    }
+  }
+  return { %$existing_document, data => \@merged_rows };
+}
+
+sub _tcg_rarity_code {
+  my ($rarity) = @_;
+  $rarity =~ s/^Extended Art\s+//i;
+  my %codes = (
+    'Common' => '(C)',
+    'Rare' => '(R)',
+    'Super Rare' => '(SR)',
+    'Ultra Rare' => '(UR)',
+    'Secret Rare' => '(ScR)',
+    'Prismatic Secret Rare' => '(PScR)',
+    'Ultimate Rare' => '(UtR)',
+    'Ultra Secret Rare' => '(UtScR)',
+    'Starlight Rare' => '(StR)',
+    'Collector\'s Rare' => '(CR)',
+    'Ghost Rare' => '(GR)',
+    'Quarter Century Secret Rare' => '(QCSR)',
+  );
+  return $codes{$rarity} || '';
+}
+
+sub merge_tcg_printings {
+  my ($existing_document, $released_rows) = @_;
+  my $existing_rows = $existing_document->{data};
+  die "TCG JSON must contain a data array\n" unless ref($existing_rows) eq 'ARRAY';
+
+  my (%by_code, %by_name, %rows_by_code);
+  for my $index (0 .. $#$existing_rows) {
+    my $card = $existing_rows->[$index];
+    my $name_key = normalize_name($card->{name} || '');
+    push @{$by_name{$name_key}}, $index if length $name_key;
+    for my $printing (@{$card->{card_sets} || []}) {
+      my $code = normalize_code($printing->{set_code} || '');
+      $by_code{$code}{$index} = 1 if length $code;
+    }
+  }
+  for my $row (@$released_rows) {
+    my $code = normalize_code($row->{card_code} || '');
+    next unless length $code;
+    push @{$rows_by_code{$code}}, $row;
+  }
+
+  my %variants_by_code;
+  for my $code (keys %rows_by_code) {
+    my (@variants, %seen);
+    for my $row (@{$rows_by_code{$code}}) {
+      my $rarities = ref($row->{rarity}) eq 'ARRAY'
+        ? $row->{rarity}
+        : defined($row->{rarity}) ? [$row->{rarity}] : [];
+      for my $rarity (@$rarities) {
+        $rarity = trim($rarity);
+        push @variants, $rarity if length($rarity) && !$seen{$rarity}++;
+      }
+    }
+    $variants_by_code{$code} = \@variants;
+  }
+
+  my %updated_codes;
+  my @updated_rows = map { { %$_ } } @$existing_rows;
+  for my $code (keys %rows_by_code) {
+    next unless @{$variants_by_code{$code}};
+    my %matches = %{$by_code{$code} || {}};
+    if (!%matches) {
+      for my $row (@{$rows_by_code{$code}}) {
+        my $name_key = normalize_name($row->{card_name} || '');
+        $matches{$_} = 1 for @{$by_name{$name_key} || []};
+      }
+    }
+    next unless %matches;
+
+    my $source = $rows_by_code{$code}[0];
+    for my $index (keys %matches) {
+      my $card = $updated_rows[$index];
+      my $old_sets = $card->{card_sets} || [];
+      my %old_by_rarity;
+      my $old_price = '0';
+      for my $printing (@$old_sets) {
+        next unless normalize_code($printing->{set_code} || '') eq $code;
+        my $rarity = $printing->{set_rarity} || '';
+        $old_by_rarity{$rarity} = $printing;
+        $old_price = $printing->{set_price} if defined $printing->{set_price};
+      }
+
+      my @replacement_sets;
+      for my $rarity (@{$variants_by_code{$code}}) {
+        my $old = $old_by_rarity{$rarity};
+        push @replacement_sets, {
+          set_name => $source->{set_name},
+          set_code => $source->{card_code},
+          set_rarity => $rarity,
+          set_rarity_code => ($old && $old->{set_rarity_code})
+            || _tcg_rarity_code($rarity),
+          set_price => $old && defined($old->{set_price})
+            ? $old->{set_price}
+            : $old_price,
+        };
+      }
+
+      my (@sets, $inserted);
+      for my $printing (@$old_sets) {
+        if (normalize_code($printing->{set_code} || '') eq $code) {
+          if (!$inserted) {
+            push @sets, @replacement_sets;
+            $inserted = 1;
+          }
+        } else {
+          push @sets, $printing;
+        }
+      }
+      push @sets, @replacement_sets unless $inserted;
+      $card->{card_sets} = \@sets;
+    }
+    $updated_codes{$code} = 1;
+  }
+
+  return ({ %$existing_document, data => \@updated_rows }, \%updated_codes);
 }
 
 sub project_api_card {
@@ -385,8 +642,9 @@ sub build_updates {
   my %released_tcg_codes = map { normalize_code($_->{card_code}) => 1 }
     @{$released_rows->{TCG}};
   my %released_name_keys;
-  for my $rows (values %$released_rows) {
-    $released_name_keys{normalize_name($_->{card_name})} = 1 for @$rows;
+  for my $region (qw(TCG AE)) {
+    $released_name_keys{normalize_name($_->{card_name})} = 1
+      for @{$released_rows->{$region} || []};
   }
   my %released_ae_codes_by_name;
   for my $row (@{$released_rows->{AE}}) {
@@ -437,6 +695,7 @@ sub build_updates {
   my $updated_tcg = merge_card_file(
     $tcg_document, \%api_by_id, \@api_ids, \%selected_ids, 1, \%ae_sets_by_name
   );
+  ($updated_tcg) = merge_tcg_printings($updated_tcg, $released_rows->{TCG});
   return ($updated_cards, $updated_tcg, $merged_ae, \%selected_ids, \@unmatched);
 }
 
@@ -478,8 +737,10 @@ sub main {
   my $cards_document = read_json($CARDS_PATH);
   my $tcg_document = read_json($TCG_PATH);
   my $ae_document = read_json($AE_PATH);
+  my $ocg_document = read_json($OCG_PATH);
   my ($updated_cards, $updated_tcg, $updated_ae, $selected_ids, $unmatched) =
     build_updates($cards_document, $tcg_document, $ae_document, $api_data, $released_rows);
+  my $updated_ocg = merge_ocg_printings($ocg_document, $released_rows->{OCG});
 
   my %old_card_ids = map {
     (defined $_->{id} ? "$_->{id}" : 'None') => 1
@@ -488,8 +749,10 @@ sub main {
     !$old_card_ids{defined $_->{id} ? "$_->{id}" : 'None'}
   } @{$updated_cards->{data}};
   my $new_ae_codes = @{$updated_ae->{data}} - @{$ae_document->{data} || []};
-  printf "YGOPRODeck: %d cards; %d cards matched to released TCG/AE lists; %d new card IDs; %d new AE printings\n",
-    scalar(@$api_data), scalar(keys %$selected_ids), $new_card_count, $new_ae_codes;
+  my $new_ocg_codes = @{$updated_ocg->{data}} - @{$ocg_document->{data} || []};
+  printf "YGOPRODeck: %d cards; %d cards matched to released TCG/AE lists; %d new card IDs; %d new AE printings; %d new OCG printings\n",
+    scalar(@$api_data), scalar(keys %$selected_ids), $new_card_count,
+    $new_ae_codes, $new_ocg_codes;
 
   if (@$unmatched) {
     print STDERR "Warning: " . scalar(@$unmatched) .
@@ -498,10 +761,11 @@ sub main {
   }
   return if $dry_run;
 
-  write_json($CARDS_PATH, $updated_cards);
-  write_json($TCG_PATH, $updated_tcg);
-  write_json($AE_PATH, $updated_ae);
-  print "Updated data/cards.json, data/tcg.json, and data/ae.json\n";
+  write_json($CARDS_PATH, $updated_cards, 1);
+  write_json($TCG_PATH, $updated_tcg, 1);
+  write_json($AE_PATH, $updated_ae, 1);
+  write_json($OCG_PATH, $updated_ocg, 1);
+  print "Updated data/cards.json, data/tcg.json, data/ae.json, and data/ocg.json\n";
 }
 
 unless (caller) {
