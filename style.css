@@ -149,6 +149,8 @@
   .collection-card-tile:hover { z-index:5; transform:scale(1.14); box-shadow:0 14px 30px rgba(0,0,0,.45); }
   .collection-card-tile img { width:100%; height:100%; object-fit:contain; display:block; background:#0e1219; }
   .collection-card-tile .card-image { height:100%; }
+  .collection-card-tile img,
+  .collection-card-tile .card-image-unavailable { cursor:pointer; }
   .card-sets-list {
     display: grid;
     gap: 8px;
@@ -2051,6 +2053,7 @@ aside nav button img {
 .card-catalog-image {
   height: 250px;
   padding: 12px;
+  cursor: pointer;
 }
 
 .card-catalog-image img {

@@ -2094,6 +2094,44 @@ async function showCardDetails(card) {
   document.getElementById("closeCardDetails")?.focus({ preventScroll: true });
 }
 
+async function showCardDetailsForImage(cardId, cardName) {
+  try {
+    await loadLocalCardDatabase();
+  } catch (error) {
+    console.error("Unable to load card details:", error);
+    showAppAlert("Card details could not be loaded. Check the local card database and try again.");
+    return;
+  }
+
+  const normalizedName = String(cardName || "").trim().toLowerCase();
+  const card = localCardDatabase.find(item => String(item.id) === String(cardId)) ||
+    localCardDatabase.find(item =>
+      String(item.name || "").trim().toLowerCase() === normalizedName
+    );
+  if (card) {
+    showCardDetails(card);
+  } else {
+    showAppAlert("Card details are not ready yet. Please try again.");
+  }
+}
+
+document.addEventListener("click", event => {
+  if (!(event.target instanceof Element)) return;
+
+  const image = event.target.closest(
+    ".card-catalog-image, .collection-card-tile img, .collection-card-tile .card-image-unavailable"
+  );
+  if (!image) return;
+
+  const cardContainer = image.closest("[data-card-id]");
+  if (cardContainer) {
+    void showCardDetailsForImage(
+      cardContainer.dataset.cardId,
+      cardContainer.dataset.cardName
+    );
+  }
+});
+
 
 function selectDeckCard(cardId) {
   selectedDeckCardId = cardId;
@@ -3290,7 +3328,11 @@ function renderCollection() {
         (card?.price || 0) * r.qty;
 
       return `
-        <div class="collection-card-tile">
+        <div
+          class="collection-card-tile"
+          data-card-id="${escapeHtml(card?.id || r.cardId)}"
+          data-card-name="${escapeHtml(r.card)}"
+        >
 
           ${getCardImageMarkup(card, r.image, r.card, "", cardTooltipAttributes(card, card?.rarity))}
 
@@ -3669,7 +3711,11 @@ function renderCards() {
       .join(" · ");
 
     return `<article class="card card-catalog-item">
-      <div class="card-image card-catalog-image">
+      <div
+        class="card-image card-catalog-image"
+        data-card-id="${escapeHtml(card.id)}"
+        data-card-name="${escapeHtml(card.name)}"
+      >
         ${getCardImageMarkup(
           card,
           imageUrl,
