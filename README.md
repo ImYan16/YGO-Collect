@@ -55,8 +55,11 @@ The deck system supports:
 * Copy limits
 * Banlist restrictions
 * Multiple decks
+* Drag-and-drop ordering of deck copies
 
-The application checks card limits against the selected banlist when cards are added to a deck.
+The application checks card limits against the selected banlist when cards are added to a deck, including purchases assigned to a deck. If a purchased card already exists in the deck, the purchase updates its recorded purchase price without adding extra copies. Purchases that cannot be added under the selected banlist remain recorded in the binder.
+
+Marketplace listings are shown as a compact list with card thumbnails. You can edit each listing's quantity and per-card price, copy the complete list as formatted text, or download one share-ready PNG containing every listing and its thumbnail.
 
 ### Spending and Purchase Tracking
 
@@ -73,6 +76,7 @@ YGO-Collect supports card pricing data from external sources.
 The project separates card catalog information from pricing information so price updates do not need to replace the underlying card database.
 
 Supported or integrated sources include TCG Corner and Players Club data.
+Deck prices match the full printing code, region, and rarity. Snapshot data is read from `tcgc-prices.json`, `playersclub-prices.json` (Asian English), and `playersclub-prices-ocg.json` (OCG); rows without a usable rarity are only used as exact-code fallbacks.
 
 ### TCG and Asian-English Support
 
@@ -101,7 +105,7 @@ The selected banlist determines the limits used by the deck builder.
 
 The `Update Official Banlists` GitHub Actions workflow refreshes TCG, Asian-English, and OCG restrictions from the official Neuron pages each day and can also be run manually. OCG's Japanese card IDs are matched to English catalog names before updating `data/banlists.json`.
 
-The `Update Card Data` workflow checks the current year's Yugipedia release calendar daily, imports released TCG-EN and OCG-AE set-list metadata, and enriches matching card records from the YGOPRODeck API. It updates `data/cards.json`, `data/tcg.json`, and `data/ae.json`; future-dated releases are skipped, and unmatched cards are reported for the next scheduled retry rather than being added with incomplete card data.
+The `Update Card Data` workflow checks the current year's Yugipedia release calendar daily, imports released TCG-EN, OCG-AE, and OCG-JP set-list metadata, and enriches matching card records from the YGOPRODeck API. It replaces stale OCG/AE rarity arrays for refreshed printings, unions duplicate scraped rows so all published variants are retained, refreshes TCG rarities, and records extended-art versions as distinct `Extended Art <rarity>` variants of the same card. It updates `data/cards.json`, `data/tcg.json`, `data/ae.json`, and `data/ocg.json`; future-dated releases are skipped, and unmatched cards are reported for the next scheduled retry rather than being added with incomplete card data. Generated catalogs are written compactly and checked against GitHub's 100 MiB per-file limit.
 
 ## Project Structure
 

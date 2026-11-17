@@ -298,15 +298,20 @@
         <div class="card"><div class="label">Deck Value</div><div class="value" id="deckValue"><span class="currency-symbol">₱</span>0</div></div>
         <div class="card"><div class="label">Cost to Complete</div><div class="value" id="deckEstimatedCost">₱0</div></div>
       </div>
-      <p class="deck-overview-note">Overview totals include all your decks. Choose a deck below to edit its list.</p>
-
-      <div class="banlist-selector">
-        <label for="banlistSelect">Banlist</label>
-        <select id="banlistSelect">
-          <option value="AE">Asian English</option>
-          <option value="TCG">TCG</option>
-          <option value="OCG">OCG</option>
-        </select>
+      <div class="deck-library-toolbar">
+        <div>
+          <p class="deck-library-label">Workspace</p>
+          <h2>Your decks</h2>
+          <p>Overview totals include all decks. Open one to edit its list.</p>
+        </div>
+        <div class="banlist-selector">
+          <label for="banlistSelect">Banlist</label>
+          <select id="banlistSelect">
+            <option value="AE">Asian English</option>
+            <option value="TCG">TCG</option>
+            <option value="OCG">OCG</option>
+          </select>
+        </div>
       </div>
       <div class="section card empty" id="deckList">No decks yet. Create a deck to start building and check card limits against your selected banlist.</div>
       <div class="section card" id="deckProfile" style="display:none;"></div>
@@ -316,27 +321,51 @@
       <div class="topbar">
         <div>
           <h1 id="marketTitle">Marketplace</h1>
-          <div class="subtitle">Manage your cards listed for sale.</div>
+          <div class="subtitle">Choose a card, select its printing, and set your asking price.</div>
         </div>
       </div>
 
-      <div class="searchbar market-searchbar">
-        <input id="marketCardSearch"
-              type="search"
-              oninput="renderMarketplace()"
-            aria-label="Find cards to list for sale"
-            placeholder="Search by card name or card code to browse cards for sale.">
-      </div>
-      <section class="section card">
-        <h2>Your Listings</h2>
-        <div id="marketplaceListings" class="grid cards marketplace-listings"></div>
-        
+      <section class="marketplace-search-panel card" aria-labelledby="marketSearchHeading">
+        <div class="marketplace-section-heading">
+          <div>
+            <p class="marketplace-eyebrow">Catalog</p>
+            <h2 id="marketSearchHeading">Find a card to list</h2>
+            <p>Search by card name or set code, then choose the exact printing.</p>
+          </div>
+          <span class="marketplace-result-count" id="marketSearchResultCount">Search to begin</span>
+        </div>
+        <label class="marketplace-search-control" for="marketCardSearch">
+          <span aria-hidden="true">⌕</span>
+          <input id="marketCardSearch"
+                 type="search"
+                 aria-label="Find cards to list for sale"
+                 placeholder="e.g. Blue-Eyes White Dragon or BETB-EN027"
+                 autocomplete="off">
+        </label>
+        <p class="marketplace-search-status" id="marketSearchStatus" role="status" aria-live="polite">Enter at least 2 characters to search the catalog.</p>
+        <div id="marketCardGrid" class="grid marketplace-search-results" aria-label="Card search results"></div>
       </section>
-      <div id="marketCardGrid" class="grid cards"></div>
+
+      <section class="section card marketplace-listings-panel" aria-labelledby="marketplaceListingsHeading">
+        <div class="marketplace-section-heading">
+          <div>
+            <p class="marketplace-eyebrow">Your inventory</p>
+            <h2 id="marketplaceListingsHeading">Your listings</h2>
+            <p>Manage quantities and prices, or share your complete list.</p>
+          </div>
+          <div class="marketplace-heading-actions">
+            <span class="marketplace-result-count" id="marketplaceListingCount">0 listings</span>
+            <button type="button" class="btn" id="copyMarketplaceListings" disabled>Copy list</button>
+            <button type="button" class="btn primary" id="downloadMarketplaceListingsImage" disabled>Download list image</button>
+          </div>
+        </div>
+        <div id="marketplaceListings" class="grid cards marketplace-listings" role="list"></div>
+      </section>
       <div class="modal" id="marketplaceModal" role="dialog" aria-modal="true" aria-labelledby="marketplaceModalTitle">
         <input id="marketplaceCardId" type="hidden">
       <div class="modal-box">
         <h2 id="marketplaceModalTitle">List Card for Sale</h2>
+        <p class="marketplace-modal-intro">Choose the printing and rarity you are offering, then set quantity and price.</p>
 
         <div class="form-grid">
           <label>Card
@@ -365,8 +394,26 @@
           <button class="btn primary" onclick="saveMarketplaceListing()">List Card</button>
         </div>
       </div>
-      
-    </div>
+      </div>
+      <div class="modal" id="marketplaceEditModal" role="dialog" aria-modal="true" aria-labelledby="marketplaceEditModalTitle">
+        <input id="marketplaceEditListingId" type="hidden">
+        <div class="modal-box">
+          <h2 id="marketplaceEditModalTitle">Edit listing</h2>
+          <p class="marketplace-modal-intro">Update how many copies are available and the price per card.</p>
+          <div class="form-grid">
+            <label>Quantity
+              <input id="marketplaceEditQty" type="number" min="1" step="1" required>
+            </label>
+            <label>Price per card
+              <input id="marketplaceEditPrice" type="number" min="0" step="0.01" required>
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button class="btn" type="button" onclick="closeMarketplaceListingEdit()">Cancel</button>
+            <button class="btn primary" type="button" onclick="saveMarketplaceListingEdit()">Save changes</button>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
 </div>

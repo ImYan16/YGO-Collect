@@ -218,30 +218,43 @@ async function loadLocalCardDatabase() {
 }
 
 function mergePrintings(existing, additions) {
-  const merged = [
+  const merged = new Map();
+  [
     ...(Array.isArray(existing) ? existing : []),
     ...(Array.isArray(additions) ? additions : [])
-  ];
-  const seen = new Set();
+  ].forEach((printing, index) => {
+    const code = String(printing.card_code || printing.set_code || "").trim().toUpperCase();
+    const key = code
+      ? `${String(printing.set_name || "").trim().toLowerCase()}|${code}`
+      : `unkeyed|${index}`;
+    const incomingRarities = Array.isArray(printing.rarity)
+      ? printing.rarity
+      : [printing.rarity || ""];
+    const current = merged.get(key);
 
-  return merged.filter(printing => {
-    const key = [
-      printing.set_name || "",
-      printing.card_code || printing.set_code || "",
-      ...(Array.isArray(printing.rarity) ? printing.rarity : [printing.rarity || ""])
-    ].join("|").toLowerCase();
+    if (!current) {
+      merged.set(key, {
+        ...printing,
+        rarity: [...new Set(incomingRarities.filter(Boolean))]
+      });
+      return;
+    }
 
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+    const rarities = [...new Set([...current.rarity, ...incomingRarities.filter(Boolean)])];
+    const hasPublishedRarity = rarities.some(rarity => rarity !== "Not Applicable");
+    current.rarity = hasPublishedRarity
+      ? rarities.filter(rarity => rarity !== "Not Applicable")
+      : rarities;
   });
+
+  return [...merged.values()];
 }
 
 function getPrimaryCardCode(card) {
   return (
-    card.asian_english_sets?.[0]?.card_code ||
-    card.ocg_sets?.[0]?.card_code ||
-    card.card_sets?.[0]?.set_code ||
+    card?.asian_english_sets?.[0]?.card_code ||
+    card?.ocg_sets?.[0]?.card_code ||
+    card?.card_sets?.[0]?.set_code ||
     ""
   );
 }
@@ -452,6 +465,7 @@ function updateCurrencyDisplay() {
     }));
   }
 
+  refreshDeckPrices();
   if (typeof renderCards === "function") renderCards();
 }
 
@@ -505,6 +519,7 @@ const TCG_CORNER_CACHE_KEY = "ygoTCGCornerCards";
 const BAKED_TCG_PRICES_FILE = "./tcgc-prices.json";
 const MAX_TCG_FEED_PAGES = 24;
 const PLAYERS_CLUB_PRICE_FILE = "./playersclub-prices.json";
+const PLAYERS_CLUB_OCG_PRICE_FILE = "./playersclub-prices-ocg.json";
 const PLAYERS_CLUB_PRODUCTS_URL = "https://playersclubhk.com/en/collections/ygoae1/products.json?limit=250&page=";
 const PLAYERS_CLUB_OCG_PRODUCTS_URL = "https://playersclubhk.com/en/collections/ocg/products.json?limit=250&page=";
 const PLAYERS_CLUB_CACHE_KEY = "ygoPlayersClubProducts";
@@ -512,6 +527,7 @@ const PLAYERS_CLUB_CACHE_TTL = 24 * 60 * 60 * 1000;
 const MAX_PLAYERS_CLUB_PAGES = 24;
 let bakedTCGPriceCatalogPromise = null;
 let bakedPlayersClubPriceCatalogPromise = null;
+let bakedPlayersClubOcgPriceCatalogPromise = null;
 let playersClubRefreshPromise = null;
 
 const TCGC_RAR = {
@@ -536,6 +552,10 @@ const TCGC_RAR = {
   PSER: "PScR", 
   PSE: "PScR",
   "Prismatic Secret Rare": "PScR",
+  "Extended Art Prismatic Secret Rare": "PScR",
+  "Extended Art Ultra Rare": "UR",
+  "Extended Art Secret Rare": "ScR",
+  "Extended Art Super Rare": "SR",
   EXSER: "ExSR", 
   ESER: "ExSR", 
   ESE: "ExSR", 
@@ -1107,9 +1127,22 @@ function renderDeckProfile() {
           const card = cards.find(item => String(item.id) === String(entry.cardId)) || entry;
           const name = card?.name || entry.card || "Unknown card";
           const rarity = entry.rarity || "";
-          const image = card?.image ? `<img src="${escapeHtml(card.image)}" alt="${escapeHtml(name)}">` : `<div class="card-image">No image</div>`;
+          const image = card?.image ? `<img src="${escapeHtml(card.image)}" alt="${escapeHtml(name)}" draggable="false">` : `<div class="card-image">No image</div>`;
           const copyNumber = entry.copyIds.indexOf(copyId) + 1;
           const cardLimit = Math.max(1, Math.min(3, getCardLimit(name)));
+          const price = Number(
+            entry.tcgCornerPrice ||
+            entry.price ||
+            entry.purchasePrice ||
+            card?.price ||
+            0
+          );
+          const paidPrice = entry.purchasePrice == null
+            ? Number.NaN
+            : Number(entry.purchasePrice);
+          const paidPriceMarkup = Number.isFinite(paidPrice)
+            ? `<small>Paid: ${money(paidPrice)}</small>`
+            : "";
           
           return `<div class="deck-list-card" data-deck-copy-id="${escapeHtml(copyId)}" draggable="true">
             ${image}
@@ -1117,7 +1150,8 @@ function renderDeckProfile() {
             <button class="deck-list-remove" title="Remove one copy" onclick="removeCardFromDeck('${escapeHtml(copyId)}')">×</button>
             <div class="deck-list-tooltip">
               <strong>${escapeHtml(name)}</strong>
-              <small>${escapeHtml(card?.cardCode || "")} · ${escapeHtml(rarity)} · ${money(entry.purchasePrice ?? entry.tcgCornerPrice ?? entry.price ?? 0)}</small>
+              <small>${escapeHtml(card?.cardCode || entry.setCode || "")} · ${escapeHtml(rarity)} · Price: ${money(price)}</small>
+              ${paidPriceMarkup}
               <div class="deck-list-tooltip-label">Card text</div>
               <p>${escapeHtml(card?.cardText || entry.cardText || "Card text unavailable.")}</p>
             </div>
@@ -1993,7 +2027,7 @@ async function showCardDetails(card) {
                     data-tcg-rarity="${escapeHtml(
                       TCGC_RAR[rarity] || rarity
                     )}">
-              ${escapeHtml(getTcgCornerRarity(rarity) || "Unknown rarity")}
+                    ${escapeHtml(getTcgCornerRarity(rarity) || "Unknown rarity")}
             </option>`
         ).join("")
         : `<option value="">No rarity available</option>`;
@@ -2163,10 +2197,7 @@ function setupDeckCardReordering() {
 
       event.dataTransfer.effectAllowed = "move";
 
-      event.dataTransfer.setData(
-        "application/x-ygo-deck-copy",
-        draggedDeckCopyId
-      );
+      event.dataTransfer.setData("text/plain", draggedDeckCopyId);
 
       tile.classList.add("dragging");
     };
@@ -2210,10 +2241,13 @@ function setupDeckCardReordering() {
       }
 
       const targetRect = tile.getBoundingClientRect();
-
-      const dropBefore =
-        event.clientY <
-        targetRect.top + targetRect.height / 2;
+      const sourceTile = [...tile.parentElement.querySelectorAll(
+        ".deck-list-card[data-deck-copy-id]"
+      )].find(card => card.dataset.deckCopyId === draggedDeckCopyId);
+      const sameRow = sourceTile && sourceTile.offsetTop === tile.offsetTop;
+      const dropBefore = sameRow
+        ? event.clientX < targetRect.left + targetRect.width / 2
+        : event.clientY < targetRect.top + targetRect.height / 2;
 
       reorderDeckCardCopy(
         draggedDeckCopyId,
@@ -2233,11 +2267,44 @@ function setupDeckCardReordering() {
       ).forEach(card => {
         card.classList.remove("drag-over");
       });
+      document.getElementById("deckCardDropZone")?.classList.remove("drop-target");
 
       draggedDeckCopyId = null;
     };
 
   });
+
+  const dropZone = document.getElementById("deckCardDropZone");
+  if (dropZone) {
+    dropZone.ondragover = event => {
+      if (!draggedDeckCopyId ||
+          (event.target instanceof Element &&
+           event.target.closest(".deck-list-card[data-deck-copy-id]"))) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      dropZone.classList.add("drop-target");
+    };
+
+    dropZone.ondragleave = event => {
+      if (!dropZone.contains(event.relatedTarget)) {
+        dropZone.classList.remove("drop-target");
+      }
+    };
+
+    dropZone.ondrop = event => {
+      if (!draggedDeckCopyId ||
+          (event.target instanceof Element &&
+           event.target.closest(".deck-list-card[data-deck-copy-id]"))) return;
+      event.preventDefault();
+      dropZone.classList.remove("drop-target");
+      const order = deckCardOrder[activeDeck] || [];
+      const lastCopyId = order[order.length - 1];
+      if (lastCopyId) {
+        reorderDeckCardCopy(draggedDeckCopyId, lastCopyId, false);
+      }
+      draggedDeckCopyId = null;
+    };
+  }
 }
 
 function reorderDeckCardCopy(draggedId, targetId, dropBefore) {
@@ -2342,15 +2409,110 @@ function addCardToDeck(
   return true;
 }
 
+function addPurchasedCardToDeck(deckName, card, qty, rarity, purchasePrice) {
+  const localCard = resolveDeckCard(card);
+  const cardId = getDeckCardId(localCard);
+  const binderNote = "\n\nThe purchase will be recorded in Binder Collection instead.";
 
-function getCardCountInDeck(deckName, cardId) {
+  if (!banlistsLoaded) {
+    showBanlistPopup(
+      "Banlist Unavailable",
+      `The banlist has not loaded, so this card was not added to the deck.${binderNote}`
+    );
+    return "banlist";
+  }
+
+  const cardLimit = getCardLimit(localCard?.name);
+  if (cardLimit === 0) {
+    showBanlistPopup(
+      "Card Forbidden",
+      `${localCard.name} is forbidden on the selected banlist.${binderNote}`
+    );
+    return "banlist";
+  }
+
+  const entries = deckCards[deckName] || [];
+  const existing = entries.find(entry =>
+    deckEntryMatchesCard(entry, cardId, localCard?.name)
+  );
+  const price = Number(purchasePrice);
+
+  if (existing) {
+    if (Number.isFinite(price) && price >= 0) {
+      existing.purchasePrice = price;
+      existing.price = price;
+    }
+    return "updated";
+  }
+
+  if (!Number.isInteger(Number(qty)) || Number(qty) < 1) {
+    return "invalid";
+  }
+  const currentCount = getCardCountInDeck(deckName, cardId, localCard?.name);
+  if (currentCount + Number(qty) > cardLimit) {
+    const remaining = Math.max(0, cardLimit - currentCount);
+    showBanlistPopup(
+      "Deck Limit Exceeded",
+      `${localCard.name} is limited to ${cardLimit} copy/copies.\n\n` +
+      `Already in deck: ${currentCount}\n` +
+      `You selected: ${qty}\n` +
+      `You can add: ${remaining}${binderNote}`
+    );
+    return "banlist";
+  }
+
+  const added = addCardEntryToDeck(
+    deckName,
+    card,
+    qty,
+    rarity,
+    getTcgCornerRarity(rarity),
+    "",
+    "",
+    purchasePrice,
+    binderNote
+  );
+
+  return added ? "added" : "invalid";
+}
+
+
+function resolveDeckCard(card) {
+  const sourceId = card?.ygoProId || card?.id;
+  const name = normalizeRulingCardName(card?.name);
+  return localCardDatabase.find(item =>
+    String(item.id) === String(sourceId) ||
+    String(item.ygoProId) === String(sourceId)
+  ) || (name
+    ? localCardDatabase.find(item =>
+        normalizeRulingCardName(item.name) === name
+      )
+    : null) || card;
+}
+
+function getDeckCardId(card) {
+  const localCard = resolveDeckCard(card);
+  return localCard?.ygoProId || localCard?.id || card?.ygoProId || card?.id;
+}
+
+function deckEntryMatchesCard(entry, cardId, cardName) {
+  if (String(entry.cardId) === String(cardId)) return true;
+  const name = normalizeRulingCardName(cardName);
+  if (!name) return false;
+  const entryCard = localCardDatabase.find(item =>
+    String(item.id) === String(entry.cardId) ||
+    String(item.ygoProId) === String(entry.cardId)
+  );
+  return normalizeRulingCardName(entry.card || entryCard?.name) === name;
+}
+
+function getCardCountInDeck(deckName, cardId, cardName = "") {
 
   const entries = deckCards[deckName] || [];
 
   return entries
     .filter(
-      entry =>
-        String(entry.cardId) === String(cardId)
+      entry => deckEntryMatchesCard(entry, cardId, cardName)
     )
     .reduce(
       (total, entry) =>
@@ -2369,20 +2531,22 @@ function addCardEntryToDeck(
   tcgCornerRarity = "",
   selectedSet = "",
   selectedRegion = "",
-  purchasePrice = null
+  purchasePrice = null,
+  banlistMessageSuffix = ""
 ) {
-  qty = Number(qty) || 1;
+  qty = Number(qty);
+  if (!Number.isInteger(qty) || qty < 1) return false;
 
-  const cardId = card.ygoProId || card.id;
+  if (!banlistsLoaded) {
+    showBanlistPopup(
+      "Banlist Unavailable",
+      "The banlist has not loaded, so this card cannot be added to a deck yet."
+    );
+    return false;
+  }
 
-  const localCard =
-    localCardDatabase.find(item =>
-      String(item.id) === String(cardId) ||
-      String(item.ygoProId) === String(cardId)
-    ) || localCardDatabase.find(item =>
-      String(item.name || "").trim().toLowerCase() ===
-      String(card.name || "").trim().toLowerCase()
-    ) || card;
+  const localCard = resolveDeckCard(card);
+  const cardId = getDeckCardId(localCard);
 
   const selectedRarity =
     asianEnglishRarity || tcgCornerRarity || "";
@@ -2431,13 +2595,13 @@ function addCardEntryToDeck(
   const entries = deckCards[deckName] ||
     (deckCards[deckName] = []);
 
-  const currentCount = getCardCountInDeck(deckName, cardId);
+  const currentCount = getCardCountInDeck(deckName, cardId, localCard.name);
   const cardLimit = getCardLimit(localCard.name);
 
   if (cardLimit === 0) {
     showBanlistPopup(
       "Card Forbidden",
-      `${localCard.name} is forbidden on the selected banlist.`
+      `${localCard.name} is forbidden on the selected banlist.${banlistMessageSuffix}`
     );
     return false;
   }
@@ -2450,14 +2614,14 @@ function addCardEntryToDeck(
       `${localCard.name} is limited to ${cardLimit} copy/copies.\n\n` +
       `Already in deck: ${currentCount}\n` +
       `You selected: ${qty}\n` +
-      `You can add: ${remaining}`
+      `You can add: ${remaining}${banlistMessageSuffix}`
     );
 
     return false;
   }
 
   const existing = entries.find(entry =>
-    String(entry.cardId) === String(cardId) &&
+    deckEntryMatchesCard(entry, cardId, localCard.name) &&
     String(entry.setCode || "") === String(printing.code || "") &&
     String(entry.rarity || "") === String(printing.rarity || "")
   );
@@ -2478,7 +2642,7 @@ function addCardEntryToDeck(
       : getDeckCardPrice(
           localCard,
           selectedRarity,
-          printing.set,
+          printing.code,
           printing.region
         ),
     purchasePrice: Number.isFinite(enteredPrice) && enteredPrice >= 0
@@ -2544,15 +2708,49 @@ function getDeckCardCopies(deckName) {
 }
 
 function syncPurchasesToDecks() {
+  if (!banlistsLoaded) return;
   let changed = false;
+  const handledCards = new Set();
   purchases.forEach(purchase => {
     if (!purchase.destination?.startsWith("Deck: ")) return;
     const deckName = purchase.destination.slice("Deck: ".length);
     const card = cards.find(item => String(item.id) === String(purchase.cardId));
-    const alreadyListed = deckCards[deckName]?.some(entry => String(entry.cardId) === String(purchase.cardId));
-    if (card && decks.includes(deckName) && !alreadyListed) {
-      addCardEntryToDeck(deckName, card, purchase.qty);
+    if (!card || !decks.includes(deckName)) return;
+    const localCard = resolveDeckCard(card);
+    const cardId = getDeckCardId(localCard);
+    const key = `${deckName}|${normalizeRulingCardName(localCard?.name) || cardId}`;
+    if (handledCards.has(key)) return;
+    handledCards.add(key);
+
+    const existing = deckCards[deckName]?.find(entry =>
+      deckEntryMatchesCard(entry, cardId, localCard?.name)
+    );
+    const previousPurchasePrice = existing?.purchasePrice;
+    const previousEntryPrice = existing?.price;
+    const result = addPurchasedCardToDeck(
+      deckName,
+      card,
+      purchase.qty,
+      purchase.rarity || card.rarity,
+      purchase.price
+    );
+    if (result !== "added" && result !== "updated") {
+      purchase.destination = "Binder Collection";
+      purchase.deckQuantityAdded = 0;
       changed = true;
+    } else {
+      if (result === "added" && purchase.deckQuantityAdded == null) {
+        purchase.deckQuantityAdded = Number(purchase.qty) || 0;
+        changed = true;
+      }
+      if (
+        result === "added" ||
+        !existing ||
+        Number(previousPurchasePrice) !== Number(purchase.price) ||
+        Number(previousEntryPrice) !== Number(purchase.price)
+      ) {
+        changed = true;
+      }
     }
   });
   if (changed) saveData();
@@ -2571,8 +2769,16 @@ function removeCardFromDeck(copyId) {
   renderDecks();
 }
 
-function removeQuantityFromDeck(deckName, cardId, qty) {
-  const entry = deckCards[deckName]?.find(item => String(item.cardId) === String(cardId));
+function getPurchaseDeckQuantity(purchase) {
+  if (purchase.deckQuantityAdded == null) return Number(purchase.qty) || 0;
+  return Math.max(0, Number(purchase.deckQuantityAdded) || 0);
+}
+
+function removeQuantityFromDeck(deckName, cardId, qty, cardName = "") {
+  if (qty <= 0) return;
+  const entry = deckCards[deckName]?.find(item =>
+    deckEntryMatchesCard(item, cardId, cardName)
+  );
   if (!entry) return;
   ensureEntryCopyIds(entry);
   const removedCopyIds = entry.copyIds.splice(Math.max(0, entry.copyIds.length - qty));
@@ -2588,7 +2794,12 @@ async function deletePurchase(purchaseId) {
   if (!await showAppConfirm(`Delete the purchase of ${purchase.card}?`)) return;
   purchases.splice(index, 1);
   if (purchase.destination?.startsWith("Deck: ")) {
-    removeQuantityFromDeck(purchase.destination.slice("Deck: ".length), purchase.cardId, purchase.qty);
+    removeQuantityFromDeck(
+      purchase.destination.slice("Deck: ".length),
+      purchase.cardId,
+      getPurchaseDeckQuantity(purchase),
+      purchase.card
+    );
   }
   saveData();
   renderDashboard();
@@ -2613,7 +2824,12 @@ async function deleteCollectionGroup(cardId, printing, destination) {
   if (!matching.length || !await showAppConfirm(`Delete all ${matching.reduce((sum, purchase) => sum + purchase.qty, 0)} copies of this card?`)) return;
   purchases = purchases.filter(purchase => !matching.includes(purchase));
   if (destination.startsWith("Deck: ")) {
-    removeQuantityFromDeck(destination.slice("Deck: ".length), cardId, matching.reduce((sum, purchase) => sum + purchase.qty, 0));
+    removeQuantityFromDeck(
+      destination.slice("Deck: ".length),
+      cardId,
+      matching.reduce((sum, purchase) => sum + getPurchaseDeckQuantity(purchase), 0),
+      matching[0]?.card
+    );
   }
   saveData();
   renderDashboard();
@@ -2958,8 +3174,34 @@ function savePurchase() {
   const card = cards.find(c => c.id == document.getElementById("purchaseRarity").value);
   const qty = Number(document.getElementById("purchaseQty").value);
   const price = Number(document.getElementById("purchasePrice").value);
-  const destination = document.getElementById("purchaseDestination").value;
-  if(!card || qty < 1 || price < 0) return;
+  let destination = document.getElementById("purchaseDestination").value;
+  let deckQuantityAdded = 0;
+  if (!card || !Number.isInteger(qty) || qty < 1 || !Number.isFinite(price) || price < 0) {
+    showAppAlert("Enter a valid card, whole-number quantity, and non-negative price.");
+    return;
+  }
+  if (destination.startsWith("Deck: ")) {
+    const deckName = destination.slice("Deck: ".length);
+    if (!decks.includes(deckName)) {
+      destination = "Binder Collection";
+    } else {
+      const result = addPurchasedCardToDeck(
+        deckName,
+        card,
+        qty,
+        card.rarity,
+        price
+      );
+      if (result === "added") {
+        deckQuantityAdded = qty;
+      } else if (result !== "updated") {
+        destination = "Binder Collection";
+        if (result === "invalid") {
+          showAppAlert("The purchase was recorded in Binder Collection because its card printing could not be added to the deck.");
+        }
+      }
+    }
+  }
   purchases.unshift({
     id: Date.now(),
     cardId: card.id,
@@ -2974,27 +3216,13 @@ function savePurchase() {
     set: getSetCode(card.cardCode) || card.cardCode || "Unknown set",
     rarity: card.rarity || "Unknown rarity",
     destination,
+    deckQuantityAdded,
     qty,
     price,
     total: qty * price,
     date: document.getElementById("purchaseDate").value,
     seller: document.getElementById("purchaseSeller").value || "—"
   });
-  if (destination.startsWith("Deck: ")) {
-    const deckName = destination.slice("Deck: ".length);
-    if (decks.includes(deckName)) {
-      addCardEntryToDeck(
-        deckName,
-        card,
-        qty,
-        card.rarity,
-        getTcgCornerRarity(card.rarity),
-        "",
-        "",
-        price
-      );
-    }
-  }
   saveData();
   closePurchase();
   renderDashboard();
@@ -3624,7 +3852,7 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false, 
         Promise.all((japaneseOnly
           ? TCG_FEEDS.filter(feed => feed.language === "Japanese")
           : TCG_FEEDS).map(loadCollectionProducts)).then(items => items.flat()),
-        refreshPlayersClubProducts(false)
+        loadPlayersClubProducts(true)
       ]);
     } catch (collectionError) {
       const response = await fetch(TCG_GLOBAL_FEED, { headers: { "Accept": "application/json" } });
@@ -3723,8 +3951,15 @@ function getPlayersClubRarity(value) {
   const normalized = String(value || "").trim().toUpperCase();
   const rarityMap = {
     UTR: "UtR",
+    UT: "UtR",
+    UL: "UtR",
     SER: "ScR",
+    SE: "ScR",
     PSER: "PScR",
+    PSE: "PScR",
+    QSER: "QCSR",
+    QSE: "QCSR",
+    QCSER: "QCSR",
     QCSE: "QCSR",
     SR: "SR",
     UR: "UR",
@@ -3737,7 +3972,8 @@ function getPlayersClubRarity(value) {
     EXSER: "ExSR",
     OSER: "OSER"
   };
-  return rarityMap[normalized] || (normalized ? "" : "C");
+  return rarityMap[normalized] || TCGC_RAR[normalized] ||
+    TCGC_RAR[String(value || "").trim()] || (normalized ? "" : "C");
 }
 
 function parsePlayersClubTitle(rawTitle, region = "AE") {
@@ -3748,9 +3984,9 @@ function parsePlayersClubTitle(rawTitle, region = "AE") {
   const code = match[1].toUpperCase();
   const unsupportedRarity = /\(\s*(?:[A-Z]{1,5}\s*\/\s*)+[A-Z]{1,5}\s*\)|\(\s*(?:NPR|AA)\s*\)/i;
   if (unsupportedRarity.test(match[2])) return null;
-  const rarityMatch = match[2].match(/\(\s*(UTR|SER|PSER|QCSE|SR|UR|R|C)\s*\)/i);
-  const rarity = getPlayersClubRarity(rarityMatch?.[1]);
-  const name = match[2].replace(/\(\s*(?:UTR|SER|PSER|QCSE|SR|UR|R|C)\s*\)/ig, "")
+  const rarityMatch = match[2].match(/\(\s*(UTR|UT|UL|SER|SE|PSER|PSE|QSER|QSE|QCSER|QCSE|SR|UR|R|C)\s*\)/i);
+  const rarity = rarityMatch ? getPlayersClubRarity(rarityMatch[1]) : "";
+  const name = match[2].replace(/\(\s*(?:UTR|UT|UL|SER|SE|PSER|PSE|QSER|QSE|QCSER|QCSE|SR|UR|R|C)\s*\)/ig, "")
     .replace(/\s+/g, " ").trim();
 
   return { code, name, rarity };
@@ -3788,7 +4024,7 @@ async function loadLivePlayersClubProducts(feed) {
       const hasMultipleRarities = /\b[A-Z]{1,5}\s*\/\s*[A-Z]{1,5}\b/i.test(variantTitle);
       const rarity = isBaseVariant ? parsed.rarity : getPlayersClubRarity(variantTitle);
       const price = Number(variant.price);
-      if (hasMultipleRarities || !rarity || !Number.isFinite(price) || price <= 0) return [];
+      if (hasMultipleRarities || !Number.isFinite(price) || price <= 0) return [];
 
       return [{
         id: `playersclub-live-${product.id}-${variant.id || index}`,
@@ -3797,7 +4033,7 @@ async function loadLivePlayersClubProducts(feed) {
         sourceLanguage: feed.region === "OCG" ? "Japanese" : "Asian English",
         cardCode: parsed.code,
         name: parsed.name || parsed.code,
-        variantTitle: rarity,
+        variantTitle: rarity || "Unspecified rarity",
         rarity,
         storePrice: price,
         storeCurrency: "HKD",
@@ -3861,29 +4097,67 @@ async function refreshPlayersClubProducts(backgroundRefresh = false) {
     .then(products => {
       if (backgroundRefresh && Array.isArray(products)) {
         const currentTCGProducts = cards.filter(card => card.sourceName !== "Players Club");
-        finishTCGProductLoad([...currentTCGProducts, ...products], false);
+        return loadPlayersClubProducts(false).then(catalogProducts => {
+          finishTCGProductLoad([
+            ...currentTCGProducts,
+            ...mergePlayersClubPriceProducts(catalogProducts || [], products)
+          ], false);
+          return products;
+        });
       }
       return products;
     })
     .catch(error => {
       if (!backgroundRefresh) console.warn("Live Players Club sync failed:", error);
-      return getCachedPlayersClubProducts() || loadBakedPlayersClubPriceCatalog();
+      const cached = getCachedPlayersClubProducts();
+      if (cached) return cached;
+      return Promise.all([
+        loadBakedPlayersClubPriceCatalog("AE"),
+        loadBakedPlayersClubPriceCatalog("OCG")
+      ]).then(catalogs => catalogs.flatMap(catalog => catalog || []));
     })
     .finally(() => { playersClubRefreshPromise = null; });
   return playersClubRefreshPromise;
 }
 
 async function loadPlayersClubProducts(forceRefresh = false) {
-  if (forceRefresh) return refreshPlayersClubProducts(false);
-  const cached = getCachedPlayersClubProducts();
-  if (cached) return cached;
-  return loadBakedPlayersClubPriceCatalog();
+  const products = [];
+  const [aeBaked, ocgBaked] = await Promise.all([
+    loadBakedPlayersClubPriceCatalog("AE"),
+    loadBakedPlayersClubPriceCatalog("OCG")
+  ]);
+  products.push(...(aeBaked || []), ...(ocgBaked || []));
+
+  const cached = forceRefresh ? null : getCachedPlayersClubProducts();
+  const liveProducts = forceRefresh
+    ? await refreshPlayersClubProducts(false)
+    : (cached || []);
+  products.push(...liveProducts);
+
+  return mergePlayersClubPriceProducts(products);
 }
 
-async function loadBakedPlayersClubPriceCatalog() {
-  if (bakedPlayersClubPriceCatalogPromise) return bakedPlayersClubPriceCatalogPromise;
+function mergePlayersClubPriceProducts(...groups) {
+  const seen = new Set();
+  return groups.flat().filter(product => {
+    const key = [
+      getDeckPriceProductRegion(product),
+      String(product.cardCode || "").trim().toUpperCase(),
+      normalizeDeckPriceRarity(product.rarity || product.variantTitle)
+    ].join("|");
+    if (!product.cardCode || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
-  bakedPlayersClubPriceCatalogPromise = fetch(PLAYERS_CLUB_PRICE_FILE, {
+async function loadBakedPlayersClubPriceCatalog(region = "AE") {
+  const isOcg = region === "OCG";
+  if (isOcg && bakedPlayersClubOcgPriceCatalogPromise) return bakedPlayersClubOcgPriceCatalogPromise;
+  if (!isOcg && bakedPlayersClubPriceCatalogPromise) return bakedPlayersClubPriceCatalogPromise;
+
+  const priceFile = isOcg ? PLAYERS_CLUB_OCG_PRICE_FILE : PLAYERS_CLUB_PRICE_FILE;
+  const catalogPromise = fetch(priceFile, {
     headers: { "Accept": "application/json" }
   })
     .then(response => {
@@ -3894,12 +4168,6 @@ async function loadBakedPlayersClubPriceCatalog() {
       if (!Array.isArray(data?.rows) || !data.rows.length) return null;
 
       const cardsByCode = new Map();
-      const cardsByName = new Map(
-        localCardDatabase.map(card => [
-          String(card.name || "").trim().toLowerCase(),
-          card
-        ])
-      );
       localCardDatabase.forEach(card => {
         getCardPrintings(card).forEach(printing => {
           cardsByCode.set(String(printing.code || "").toUpperCase(), card);
@@ -3908,29 +4176,33 @@ async function loadBakedPlayersClubPriceCatalog() {
 
       return data.rows.map((row, index) => {
         const code = String(row[0] || "").toUpperCase();
-        const parsed = parsePlayersClubTitle(`${code} ${row[2] || ""}`);
-        const card = cardsByCode.get(code) ||
-          cardsByName.get(String(parsed?.name || row[2] || "").trim().toLowerCase());
+        const parsed = parsePlayersClubTitle(`${code} ${row[2] || ""}`, region);
+        const card = cardsByCode.get(code);
         const price = Number(row[1]);
-        if (!code || !row[2] || !parsed || !Number.isFinite(price)) return null;
-        const displayName = parsed.name || card?.name || code;
+        const condition = String(row[4] || "").trim();
+        if (!code || !row[2] || !Number.isFinite(price) || condition) return null;
+        const sourceRarity = String(row[3] || "").trim();
+        const rarity = /^default title$/i.test(sourceRarity)
+          ? ""
+          : (getPlayersClubRarity(sourceRarity) || parsed?.rarity || "");
+        const displayName = card?.name || parsed?.name || String(row[2]);
 
         return {
-          id: `playersclub-baked-${index}-${code}`,
-          productId: `playersclub-baked-${code}`,
+          id: `playersclub-baked-${region}-${index}-${code}`,
+          productId: `playersclub-baked-${region}-${code}`,
           sourceName: "Players Club",
-          sourceLanguage: "Asian English",
+          sourceLanguage: isOcg ? "Japanese" : "Asian English",
+          priceRegion: region,
           cardCode: code,
           name: displayName,
-          variantTitle: parsed.rarity,
-          rarity: parsed.rarity,
+          variantTitle: rarity || "Unspecified rarity",
+          rarity,
           cardText: card?.cardText || card?.desc || "",
           storePrice: price,
-          storeCurrency: "HKD",
-          price: convertStorePrice(price, "HKD"),
+          storeCurrency: data.currency || "HKD",
           available: Boolean(row[5]),
           image: card?.image || "",
-          tags: "Asian English Players Club",
+          tags: `${region} Players Club`,
           url: ""
         };
       }).filter(Boolean);
@@ -3940,7 +4212,9 @@ async function loadBakedPlayersClubPriceCatalog() {
       return null;
     });
 
-  return bakedPlayersClubPriceCatalogPromise;
+  if (isOcg) bakedPlayersClubOcgPriceCatalogPromise = catalogPromise;
+  else bakedPlayersClubPriceCatalogPromise = catalogPromise;
+  return catalogPromise;
 }
 
 function getCachedTCGProducts() {
@@ -4002,6 +4276,9 @@ async function loadBakedTCGPriceCatalog() {
           variantTitle: String(row[3] || "Default"),
           rarity: String(row[3] || "Other"),
           cardText: card?.cardText || card?.desc || "",
+          sourceName: "TCG Corner",
+          sourceLanguage: "Asian English",
+          priceRegion: "AE",
           storePrice: price,
           storeCurrency: data.currency || "USD",
           available: Boolean(row[5]),
@@ -4105,7 +4382,9 @@ function finishTCGProductLoad(products, shouldCache = true) {
         : bakedCard;
     });
     const playersClubCards = products.filter(card => card.sourceName === "Players Club");
-    const japaneseCards = products.filter(card => card.sourceLanguage === "Japanese");
+    const japaneseCards = products.filter(card =>
+      card.sourceLanguage === "Japanese" && card.sourceName !== "Players Club"
+    );
     products = [...mergedTCGCards, ...playersClubCards, ...japaneseCards];
   }
 
@@ -4129,6 +4408,7 @@ function finishTCGProductLoad(products, shouldCache = true) {
   tcgLoading = false;
 
   syncPurchasesToDecks();
+  refreshDeckPrices();
   renderCards();
   populatePurchaseSelector();
   renderDecks();
@@ -4136,7 +4416,6 @@ function finishTCGProductLoad(products, shouldCache = true) {
   renderSpending();
   renderSpendingCardMatches();
   renderCollectionCardMatches();
-  renderMarketplace();
   renderMarketplaceCards();
   renderMarketplaceListings();
 }
@@ -4173,19 +4452,48 @@ function populatePurchaseSelector() {
 }
 
 function getDeckCardPrice(card, rarity = "", setCode = "", region = "") {
-  const wantedRarity = getTcgCornerRarity(rarity).toLowerCase();
+  const code = String(setCode || card.cardCode || "").trim().toUpperCase();
+  if (!code) return 0;
 
-  const matchesCard = item =>
-    String(item.cardCode || "").toLowerCase() ===
-      String(card.cardCode || "").toLowerCase() ||
-    item.name === card.name;
-
-  const variant = cards.find(item =>
-    matchesCard(item) &&
-    String(item.rarity || "").toLowerCase() === wantedRarity
+  const wantedRegion = String(region || "").trim().toUpperCase();
+  const wantedRarity = normalizeDeckPriceRarity(rarity);
+  const matches = cards.filter(item =>
+    String(item.cardCode || "").trim().toUpperCase() === code &&
+    (!wantedRegion || getDeckPriceProductRegion(item) === wantedRegion)
+  );
+  const exactMatch = wantedRarity
+    ? matches.find(item =>
+        normalizeDeckPriceRarity(item.rarity || item.variantTitle) === wantedRarity
+      )
+    : matches[0];
+  const match = exactMatch || matches.find(item =>
+    !normalizeDeckPriceRarity(item.rarity || item.variantTitle)
   );
 
-  return Number(variant?.price || 0);
+  return Number(match?.price || 0);
+}
+
+function getDeckPriceProductRegion(product) {
+  const region = String(product.priceRegion || product.region || "").trim().toUpperCase();
+  if (region === "AE" || region === "OCG" || region === "TCG") return region;
+
+  const language = String(product.sourceLanguage || "").trim().toLowerCase();
+  if (language === "japanese" || language === "ocg") return "OCG";
+  if (language === "asian english" || language === "ae") return "AE";
+
+  const code = String(product.cardCode || "").trim().toUpperCase();
+  if (/-AE[A-Z0-9]*\d+$/.test(code)) return "AE";
+  if (/-JP[A-Z0-9]*\d+$/.test(code)) return "OCG";
+  return "TCG";
+}
+
+function normalizeDeckPriceRarity(value) {
+  const rarity = String(value || "").trim();
+  if (!rarity || /^(?:default(?: title)?|other|unknown|unspecified rarity)$/i.test(rarity)) return "";
+  if (rarity.includes("/")) return "";
+
+  const canonical = getPlayersClubRarity(rarity) || getTcgCornerRarity(rarity);
+  return String(canonical || rarity).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 
@@ -4204,6 +4512,7 @@ async function loadBanlists() {
       AE: normalizeBanlistSection(data.AE),
       OCG: normalizeBanlistSection(data.OCG)
     };
+    banlistsLoaded = true;
 
     console.log("Loaded banlists:", {
       TCG: Object.keys(banlists.TCG).length,
@@ -4213,6 +4522,7 @@ async function loadBanlists() {
   } catch (error) {
     console.error("Banlist loading failed:", error);
     banlists = { TCG: {}, AE: {}, OCG: {} };
+    banlistsLoaded = false;
   }
 }
 
@@ -4299,7 +4609,17 @@ function getCardLimit(cardName) {
     return 3;
   }
 
-  const entry = banlist[String(cardName || "").trim().toLowerCase()];
+  const requestedName = String(cardName || "").trim().toLowerCase();
+  let entry = banlist[requestedName];
+  if (entry === undefined || entry === null) {
+    const normalizedName = normalizeRulingCardName(requestedName);
+    if (normalizedName) {
+      const matchingKey = Object.keys(banlist).find(
+        name => normalizeRulingCardName(name) === normalizedName
+      );
+      if (matchingKey) entry = banlist[matchingKey];
+    }
+  }
 
   if (entry === undefined || entry === null) return 3;
 
@@ -4480,11 +4800,10 @@ function cardTooltipAttributes(card, rarity = "", code = "", price) {
 }
 
 let activeCardTooltip = null;
+let activeCardTooltipImage = null;
 
-document.addEventListener("mouseover", event => {
-  const image = event.target.closest("img[data-tooltip-name]");
-  if (!image) return;
-
+function showCardTooltip(image) {
+  if (activeCardTooltipImage === image) return;
   activeCardTooltip?.remove();
 
   const tooltip = document.createElement("div");
@@ -4516,18 +4835,52 @@ document.addEventListener("mouseover", event => {
 
   document.body.appendChild(tooltip);
   activeCardTooltip = tooltip;
+  activeCardTooltipImage = image;
 
   const rect = image.getBoundingClientRect();
-  tooltip.style.left = `${Math.min(rect.right + 10, window.innerWidth - tooltip.offsetWidth - 10)}px`;
-  tooltip.style.top = `${Math.max(10, rect.top)}px`;
+  const maxLeft = Math.max(10, window.innerWidth - tooltip.offsetWidth - 10);
+  const maxTop = Math.max(10, window.innerHeight - tooltip.offsetHeight - 10);
+  const rightSide = rect.right + 10;
+  const requestedLeft = rightSide + tooltip.offsetWidth <= window.innerWidth - 10
+    ? rightSide
+    : rect.left - tooltip.offsetWidth - 10;
+  tooltip.style.left = `${Math.max(10, Math.min(requestedLeft, maxLeft))}px`;
+  tooltip.style.top = `${Math.max(10, Math.min(rect.top, maxTop))}px`;
+}
+
+function hideCardTooltip() {
+  activeCardTooltip?.remove();
+  activeCardTooltip = null;
+  activeCardTooltipImage = null;
+}
+
+document.addEventListener("pointerover", event => {
+  if (event.pointerType === "touch" || !(event.target instanceof Element)) return;
+  const image = event.target.closest("img[data-tooltip-name]");
+  if (!image) return;
+  showCardTooltip(image);
 });
 
-document.addEventListener("mouseout", event => {
+document.addEventListener("pointerout", event => {
+  if (event.pointerType === "touch" || !(event.target instanceof Element)) return;
   const image = event.target.closest("img[data-tooltip-name]");
-  if (image && !image.contains(event.relatedTarget)) {
-    activeCardTooltip?.remove();
-    activeCardTooltip = null;
+  if (image && !image.contains(event.relatedTarget) && activeCardTooltipImage === image) {
+    hideCardTooltip();
   }
+});
+
+document.addEventListener("click", event => {
+  const isTouch = event.pointerType === "touch" ||
+    window.matchMedia("(hover: none)").matches;
+  if (!isTouch || !(event.target instanceof Element)) return;
+
+  const image = event.target.closest("img[data-tooltip-name]");
+  if (!image) {
+    hideCardTooltip();
+    return;
+  }
+  if (activeCardTooltipImage === image) hideCardTooltip();
+  else showCardTooltip(image);
 });
 
 
@@ -4555,7 +4908,12 @@ function addMarketplaceListing(card, quantity, price, set, rarity) {
 }
 
 function getMarketplaceImage(card, listingImage = "") {
-  return getCardImageWithFallback(card, listingImage);
+  return listingImage ||
+    getCardImageUrl(card, false) ||
+    getCardImageUrl(card) ||
+    getCardCatalogImage(card) ||
+    getStoredCardImage(card?.name) ||
+    "";
 }
 
 function getStoredCardImage(cardName) {
@@ -4578,36 +4936,325 @@ function getStoredCardImage(cardName) {
   return getStoredCardImage.index.get(nameKey) || "";
 }
 
-function renderMarketplaceListings() {
-  const container = document.getElementById("marketplaceListings");
-  if (!container) return;
-  container.innerHTML = marketplaceListings.map(listing => {
+function getMarketplaceListingsData() {
+  return marketplaceListings.map(listing => {
     const card = localCardDatabase.find(
       item => String(item.id) === String(listing.cardId)
     );
+    return card ? { listing, card } : null;
+  }).filter(Boolean);
+}
 
-    if (!card) return "";
-    
+function getMarketplaceListingsText(listings = getMarketplaceListingsData()) {
+  if (!listings.length) return "";
+  const totalCopies = listings.reduce(
+    (total, { listing }) =>
+      total + Number(listing.quantity ?? listing.qty ?? 1),
+    0
+  );
+  return [
+    "Yu-Gi-Oh! Marketplace",
+    `${listings.length} ${listings.length === 1 ? "listing" : "listings"} · ${totalCopies} total copies`,
+    "",
+    ...listings.map(({ listing, card }, index) => {
+      const quantity = Number(listing.quantity ?? listing.qty ?? 1);
+      return [
+        `${index + 1}. ${card.name}`,
+        `   ${listing.set || "Unknown set"} · ${listing.rarity || "Unknown rarity"} · ${listing.region || "TCG"}`,
+        `   Quantity: ${quantity} · ${formatPrice(Number(listing.price || 0))} each`
+      ].join("\n");
+    })
+  ].join("\n");
+}
+
+async function copyMarketplaceListingsText() {
+  const listings = getMarketplaceListingsData();
+  if (!listings.length) {
+    showAppAlert("Add a marketplace listing before copying the list.");
+    return;
+  }
+
+  const text = getMarketplaceListingsText(listings);
+  try {
+    let copied = false;
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (error) {
+        console.info("Clipboard API failed; trying the compatibility copy method.", error);
+      }
+    }
+    if (!copied) {
+      const input = document.createElement("textarea");
+      input.value = text;
+      input.setAttribute("readonly", "");
+      input.style.position = "fixed";
+      input.style.opacity = "0";
+      document.body.appendChild(input);
+      let copied;
+      try {
+        input.select();
+        copied = document.execCommand("copy");
+      } finally {
+        input.remove();
+      }
+      if (!copied) throw new Error("The browser did not allow clipboard access.");
+    }
+    showAppAlert("Marketplace listing copied to the clipboard.");
+  } catch (error) {
+    console.error("Unable to copy marketplace listings:", error);
+    showAppAlert("Could not copy the listings. Check clipboard permissions and try again.");
+  }
+}
+
+function drawMarketplaceShareText(context, text, x, y, maxWidth, lineHeight, maxLines) {
+  const lines = [];
+  let line = "";
+  String(text || "").split(/\s+/).forEach(word => {
+    const candidate = line ? `${line} ${word}` : word;
+    if (line && context.measureText(candidate).width > maxWidth) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  });
+  if (line) lines.push(line);
+  lines.slice(0, maxLines).forEach((value, index) => {
+    const truncated = index === maxLines - 1 && lines.length > maxLines
+      ? `${value.slice(0, Math.max(0, value.length - 3))}...`
+      : value;
+    context.fillText(truncated, x, y + index * lineHeight, maxWidth);
+  });
+}
+
+function loadMarketplaceShareImage(source) {
+  return new Promise(resolve => {
+    if (!source) {
+      resolve(null);
+      return;
+    }
+
+    const timeout = setTimeout(() => finish(null), 5000);
+    const finish = result => {
+      clearTimeout(timeout);
+      resolve(result);
+    };
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => finish(image);
+    image.onerror = () => finish(null);
+    image.src = source;
+  });
+}
+
+async function downloadMarketplaceListingsImage() {
+  const listings = getMarketplaceListingsData();
+  if (!listings.length) {
+    showAppAlert("Add a marketplace listing before downloading the list image.");
+    return;
+  }
+
+  const images = await Promise.all(listings.map(({ listing, card }) =>
+    loadMarketplaceShareImage(getMarketplaceImage(card, listing.image))
+  ));
+  const headerHeight = 248;
+  const rowHeight = 112;
+  const footerHeight = 52;
+  const canvas = document.createElement("canvas");
+  canvas.width = 1200;
+  canvas.height = headerHeight + listings.length * rowHeight + footerHeight;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    showAppAlert("Your browser could not create the marketplace list image.");
+    return;
+  }
+
+  const background = context.createLinearGradient(0, 0, canvas.width, canvas.height);
+  background.addColorStop(0, "#101722");
+  background.addColorStop(1, "#1c2a3a");
+  context.fillStyle = background;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#182331";
+  context.fillRect(40, 40, 1120, canvas.height - 80);
+  context.strokeStyle = "#344357";
+  context.lineWidth = 2;
+  context.strokeRect(40, 40, 1120, canvas.height - 80);
+
+  context.fillStyle = "#9fb4cb";
+  context.font = "700 22px Segoe UI, sans-serif";
+  context.fillText("YGO COLLECT  /  MARKETPLACE", 76, 94);
+  context.fillStyle = "#f4f7fb";
+  context.font = "700 42px Segoe UI, sans-serif";
+  context.fillText("Your card listings", 76, 154);
+  const totalCopies = listings.reduce(
+    (total, { listing }) =>
+      total + Number(listing.quantity ?? listing.qty ?? 1),
+    0
+  );
+  context.fillStyle = "#aab7c6";
+  context.font = "18px Segoe UI, sans-serif";
+  context.fillText(
+    `${listings.length} ${listings.length === 1 ? "listing" : "listings"} · ${totalCopies} total copies`,
+    76,
+    184
+  );
+  context.fillStyle = "#72849a";
+  context.font = "700 14px Segoe UI, sans-serif";
+  context.fillText("CARD / PRINTING", 170, headerHeight - 22);
+  context.fillText("QTY", 850, headerHeight - 22);
+  context.fillText("PRICE EACH", 960, headerHeight - 22);
+
+  listings.forEach(({ listing, card }, index) => {
+    const top = headerHeight + index * rowHeight;
+    const quantity = Number(listing.quantity ?? listing.qty ?? 1);
+    const image = images[index];
+    context.fillStyle = index % 2 === 0 ? "#202d3b" : "#182331";
+    context.fillRect(60, top, 1080, rowHeight);
+    context.strokeStyle = "#344357";
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(60, top + rowHeight);
+    context.lineTo(1140, top + rowHeight);
+    context.stroke();
+
+    const art = { x: 86, y: top + 6, width: 68, height: 100 };
+    context.fillStyle = "#111a25";
+    context.fillRect(art.x, art.y, art.width, art.height);
+    context.strokeStyle = "#56657a";
+    context.lineWidth = 1;
+    context.strokeRect(art.x, art.y, art.width, art.height);
+    if (image) {
+      const scale = Math.min(art.width / image.naturalWidth, art.height / image.naturalHeight);
+      const width = image.naturalWidth * scale;
+      const height = image.naturalHeight * scale;
+      context.drawImage(
+        image,
+        art.x + (art.width - width) / 2,
+        art.y + (art.height - height) / 2,
+        width,
+        height
+      );
+    } else {
+      context.fillStyle = "#aab7c6";
+      context.font = "10px Segoe UI, sans-serif";
+      context.fillText("No image", art.x + 8, art.y + 52, art.width - 16);
+    }
+
+    context.fillStyle = "#7de0b0";
+    context.font = "700 17px Segoe UI, sans-serif";
+    context.fillText(String(index + 1).padStart(2, "0"), 64, top + 44);
+    context.fillStyle = "#f4f7fb";
+    context.font = "700 22px Segoe UI, sans-serif";
+    drawMarketplaceShareText(context, card.name, 170, top + 37, 634, 27, 1);
+    context.fillStyle = "#aab7c6";
+    context.font = "15px Segoe UI, sans-serif";
+    drawMarketplaceShareText(
+      context,
+      `${listing.set || "Unknown set"} · ${listing.rarity || "Unknown rarity"} · ${listing.region || "TCG"}`,
+      170,
+      top + 68,
+      634,
+      20,
+      1
+    );
+    context.fillStyle = "#f4f7fb";
+    context.font = "700 20px Segoe UI, sans-serif";
+    context.fillText(String(quantity), 850, top + 58);
+    context.fillStyle = "#7de0b0";
+    context.font = "700 20px Segoe UI, sans-serif";
+    context.fillText(formatPrice(Number(listing.price || 0)), 960, top + 58);
+  });
+
+  let blob;
+  try {
+    blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+  } catch (error) {
+    console.error("Unable to export marketplace listings image:", error);
+    showAppAlert("Could not export the marketplace list image. Please try again.");
+    return;
+  }
+  if (!blob) {
+    showAppAlert("Your browser could not export the marketplace list image.");
+    return;
+  }
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "ygo-marketplace-listings.png";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function renderMarketplaceListings() {
+  const container = document.getElementById("marketplaceListings");
+  if (!container) return;
+  const listings = getMarketplaceListingsData();
+  const count = document.getElementById("marketplaceListingCount");
+  const copyButton = document.getElementById("copyMarketplaceListings");
+  const imageButton = document.getElementById("downloadMarketplaceListingsImage");
+  if (count) {
+    count.textContent = `${listings.length} ${listings.length === 1 ? "listing" : "listings"}`;
+  }
+  if (copyButton) copyButton.disabled = listings.length === 0;
+  if (imageButton) imageButton.disabled = listings.length === 0;
+
+  if (!listings.length) {
+    container.innerHTML = `
+      <div class="marketplace-empty-state">
+        <span class="marketplace-empty-icon" aria-hidden="true">+</span>
+        <div>
+          <strong>No active listings yet</strong>
+          <p>Search the catalog above and choose <b>List this card</b> to create your first listing.</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = listings.map(({ listing, card }) => {
     const quantity = Number(listing.quantity ?? listing.qty ?? 1);
     const price = Number(listing.price || 0);
 
     return `
-      <article class="card marketplace-listing">
-        ${getCardImageMarkup(card, listing.image || getMarketplaceImage(card), card.name, "", cardTooltipAttributes(card, listing.rarity))}
-
-        <div class="card-info">
-          <strong>${escapeHtml(card.name)}</strong>
-          <small>
-            ${escapeHtml(listing.set || "Unknown set")} ·
-            ${escapeHtml(listing.region || "TCG")} ·
-            ${escapeHtml(listing.rarity || "Unknown rarity")}<br>
-            Qty: ${quantity}
-          </small>
-
-          <div class="price">${formatPrice(price)}</div>
-
-          <button class="btn remove-listing"
-                  type="button"
+      <article class="marketplace-listing" role="listitem">
+        <div class="marketplace-listing-product">
+          <div class="marketplace-listing-art">
+            ${getCardImageMarkup(
+              card,
+              listing.image || getMarketplaceImage(card),
+              card.name,
+              "marketplace-listing-image",
+              cardTooltipAttributes(card, listing.rarity)
+            )}
+          </div>
+          <div class="marketplace-listing-card">
+            <strong>${escapeHtml(card.name)}</strong>
+            <span>${escapeHtml(listing.set || "Unknown set")} · ${escapeHtml(listing.rarity || "Unknown rarity")} · ${escapeHtml(listing.region || "TCG")}</span>
+          </div>
+        </div>
+        <div class="marketplace-listing-facts">
+          <div class="marketplace-listing-stock">
+            <span>Quantity</span>
+            <strong>${quantity} ${quantity === 1 ? "copy" : "copies"}</strong>
+          </div>
+          <div class="marketplace-listing-price">
+            <span>Price each</span>
+            <strong>${formatPrice(price)}</strong>
+          </div>
+        </div>
+        <div class="marketplace-listing-actions">
+          <button class="btn marketplace-edit-listing" type="button"
+                  aria-label="Edit listing for ${escapeHtml(card.name)}"
+                  data-listing-id="${escapeHtml(String(listing.id))}">
+            Edit
+          </button>
+          <button class="btn remove-listing" type="button"
+                  aria-label="Remove listing for ${escapeHtml(card.name)}"
                   data-listing-id="${escapeHtml(String(listing.id))}">
             Remove
           </button>
@@ -4621,10 +5268,16 @@ function renderMarketplaceListings() {
 document
   .getElementById("marketplaceListings")
   ?.addEventListener("click", event => {
-    const button = event.target.closest(".remove-listing");
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest("button[data-listing-id]");
     if (!button) return;
 
     const listingId = button.dataset.listingId;
+    if (button.classList.contains("marketplace-edit-listing")) {
+      openMarketplaceListingEdit(listingId);
+      return;
+    }
+    if (!button.classList.contains("remove-listing")) return;
 
     marketplaceListings = marketplaceListings.filter(
       listing => String(listing.id) !== String(listingId)
@@ -4633,6 +5286,60 @@ document
     saveMarketplaceListings();
     renderMarketplaceListings();
   });
+
+document
+  .getElementById("copyMarketplaceListings")
+  ?.addEventListener("click", () => void copyMarketplaceListingsText());
+
+document
+  .getElementById("downloadMarketplaceListingsImage")
+  ?.addEventListener("click", () => void downloadMarketplaceListingsImage());
+
+function openMarketplaceListingEdit(listingId) {
+  const listing = marketplaceListings.find(
+    item => String(item.id) === String(listingId)
+  );
+  const modal = document.getElementById("marketplaceEditModal");
+  if (!listing || !modal) {
+    showAppAlert("This marketplace listing could not be found.");
+    return;
+  }
+
+  document.getElementById("marketplaceEditListingId").value = String(listing.id);
+  document.getElementById("marketplaceEditQty").value =
+    Number(listing.quantity ?? listing.qty ?? 1);
+  document.getElementById("marketplaceEditPrice").value =
+    Number(listing.price || 0);
+  modal.classList.add("open");
+  document.getElementById("marketplaceEditQty").focus();
+}
+
+function closeMarketplaceListingEdit() {
+  document.getElementById("marketplaceEditModal")?.classList.remove("open");
+}
+
+function saveMarketplaceListingEdit() {
+  const listingId = document.getElementById("marketplaceEditListingId").value;
+  const listing = marketplaceListings.find(
+    item => String(item.id) === String(listingId)
+  );
+  const quantity = Number(document.getElementById("marketplaceEditQty").value);
+  const price = Number(document.getElementById("marketplaceEditPrice").value);
+  if (!listing) {
+    showAppAlert("This marketplace listing could not be found.");
+    return;
+  }
+  if (!Number.isInteger(quantity) || quantity < 1 || !Number.isFinite(price) || price < 0) {
+    showAppAlert("Enter a whole-number quantity and a non-negative price.");
+    return;
+  }
+
+  listing.quantity = quantity;
+  listing.price = price;
+  saveMarketplaceListings();
+  closeMarketplaceListingEdit();
+  renderMarketplaceListings();
+}
 
 function openMarketplace(cardId) {
   const card = localCardDatabase.find(
@@ -4669,8 +5376,9 @@ function openMarketplace(cardId) {
   setSelect.innerHTML = sets.map(printing => `
         <option value="${escapeHtml(`${printing.region}|${printing.set}`)}"
           data-set="${escapeHtml(printing.set)}"
+          data-set-name="${escapeHtml(printing.setName || printing.set)}"
             data-region="${escapeHtml(printing.region)}">
-      ${escapeHtml(printing.set)} — ${escapeHtml(printing.region)}
+      ${escapeHtml(printing.setName || printing.set)} (${escapeHtml(printing.set)}) — ${escapeHtml(printing.region)}
     </option>
   `).join("");
   const preferredOption = [...setSelect.options].find(option =>
@@ -4701,7 +5409,7 @@ function updateMarketplaceRarities(card) {
                   data-tcg-rarity="${escapeHtml(
                     TCGC_RAR[rarity] || rarity
                   )}">
-        ${escapeHtml(getTcgCornerRarity(rarity) || "Unknown rarity")}
+        ${escapeHtml(rarity || "Unknown rarity")}
       </option>`
     )
     .join("") || `<p class="empty">No cards listed for sale.</p>`;
@@ -4727,19 +5435,14 @@ function saveMarketplaceListings() {
 }
 
 function saveMarketplaceListing() {
-  console.log("Add Listing clicked");
-  
   const cardId = document.getElementById("marketplaceCardId").value;
-
-  console.log("Selected card ID:", cardId);
-  console.log("Database loaded:", localCardDatabase?.length);
-
   const card = localCardDatabase.find(
     item => String(item.id) === String(cardId)
   );
 
   if (!card) {
     console.error("Marketplace card not found:", cardId);
+    showAppAlert("This card could not be found in the catalog.");
     return;
   }
 
@@ -4751,14 +5454,18 @@ function saveMarketplaceListing() {
     document.getElementById("marketplacePrice").value
   );
 
-  if (quantity < 1 || price < 0) return;
+  if (!Number.isInteger(quantity) || quantity < 1 || !Number.isFinite(price) || price < 0) {
+    showAppAlert("Enter a whole-number quantity and a non-negative price.");
+    return;
+  }
 
   marketplaceListings.unshift({
     id: crypto.randomUUID(),
     cardId: String(card.id),
     card: card.name,
     image: getMarketplaceImage(card),
-    set: document.getElementById("marketplaceSet").selectedOptions[0]?.dataset.set || "",
+    set: document.getElementById("marketplaceSet").selectedOptions[0]?.dataset.setName ||
+      document.getElementById("marketplaceSet").selectedOptions[0]?.dataset.set || "",
     region: document.getElementById("marketplaceSet").selectedOptions[0]?.dataset.region || "TCG",
     rarity: document.getElementById("marketplaceRarity").value,
     quantity,
@@ -4771,51 +5478,7 @@ function saveMarketplaceListing() {
   renderMarketplaceListings();
 }
 
-function renderMarketplace() {
-  const grid = document.getElementById("marketCardGrid");
-  const input = document.getElementById("marketCardSearch");
-
-  if (!grid) return;
-
-  const query = String(input?.value || "").trim().toLowerCase();
-
-  if (!query) {
-    grid.innerHTML = "";
-    return;
-  }
-
-  const matchingCards = localCardDatabase.filter(card =>
-    String(card.name || "").toLowerCase().includes(query) ||
-    getCardSets(card).some(set =>
-      String(set).toLowerCase().includes(query)
-    )
-  );
-
-  grid.innerHTML = matchingCards.slice(0, 100).map(card => `
-    <article class="card">
-      <img src="${escapeHtml(getCardImageUrl(card))}"
-           alt="${escapeHtml(card.name || "")}">
-
-      <h3>${escapeHtml(card.name || "Unknown card")}</h3>
-
-      <button type="button"
-              class="btn primary"
-              data-card-id="${escapeHtml(String(card.id))}">
-        Add Listing
-      </button>
-    </article>
-  `).join("") || "<p>No cards found.</p>";
-}
-
-document.getElementById("marketCardSearch")
-  ?.addEventListener("input", renderMarketplaceCards);
-
-const tcgCornerCacheKey = "tcgCornerPriceCache";
-const tcgCornerCache = JSON.parse(
-  localStorage.getItem(tcgCornerCacheKey) || "{}"
-);
-
-async function refreshDeckPrices() {
+function refreshDeckPrices() {
   let changed = false;
 
   for (const deckName of Object.keys(deckCards || {})) {
@@ -4823,34 +5486,17 @@ async function refreshDeckPrices() {
       const card = localCardDatabase.find(
         item => String(item.id) === String(entry.cardId)
       );
-
       if (!card) continue;
 
-      const printing = getCardPrintings(card).find(item =>
-        String(item.code || "") === String(entry.setCode || "") &&
-        String(item.rarity || "") === String(entry.rarity || "")
+      const price = getDeckCardPrice(
+        card,
+        entry.rarity,
+        entry.setCode,
+        entry.region
       );
-
-      if (!printing || typeof getTcgCornerPrice !== "function") continue;
-
-      const cacheKey = [
-        card.id,
-        printing.region,
-        printing.code,
-        printing.rarity
-      ].join("|");
-
-      let price = tcgCornerCache[cacheKey];
-
-      if (price === undefined) {
-        price = await getTcgCornerPrice(card, printing);
-        if (Number.isFinite(price)) {
-          tcgCornerCache[cacheKey] = price;
-          changed = true;
-        }
-      }
-
-      if (Number.isFinite(price)) {
+      if (price > 0) {
+        changed ||= Number(entry.tcgCornerPrice) !== price ||
+          Number(entry.price) !== price;
         entry.tcgCornerPrice = price;
         entry.price = price;
       }
@@ -4858,14 +5504,9 @@ async function refreshDeckPrices() {
   }
 
   if (changed) {
-    localStorage.setItem(
-      tcgCornerCacheKey,
-      JSON.stringify(tcgCornerCache)
-    );
     saveData();
+    renderDecks();
   }
-
-  renderDecks();
 }
 
 document
@@ -4946,13 +5587,25 @@ function getTcgCornerRarity(rarity) {
 function renderMarketplaceCards() {
   const grid = document.getElementById("marketCardGrid");
   const search = document.getElementById("marketCardSearch");
+  const status = document.getElementById("marketSearchStatus");
+  const resultCount = document.getElementById("marketSearchResultCount");
 
   if (!grid) return;
 
   const query = String(search?.value || "").trim().toLowerCase();
+  const setStatus = (message, count) => {
+    if (status) status.textContent = message;
+    if (resultCount) resultCount.textContent = count;
+  };
 
-  if (!query) {
+  if (query.length < 2) {
     grid.innerHTML = "";
+    setStatus(
+      query
+        ? "Type at least 2 characters to search the catalog."
+        : "Enter at least 2 characters to search the catalog.",
+      query ? "Keep typing" : "Search to begin"
+    );
     return;
   }
 
@@ -4964,28 +5617,51 @@ function renderMarketplaceCards() {
 
   const results = source.filter(card => {
     const name = String(card.name || "").toLowerCase();
-    const code = String(card.cardCode || "").toLowerCase();
+    const codes = [
+      card.cardCode,
+      ...(Array.isArray(card.card_sets) ? card.card_sets.map(set => set.set_code) : []),
+      ...(Array.isArray(card.asian_english_sets)
+        ? card.asian_english_sets.flatMap(set => [set.card_code, set.set_code])
+        : []),
+      ...(Array.isArray(card.ocg_sets)
+        ? card.ocg_sets.flatMap(set => [set.card_code, set.set_code])
+        : [])
+    ];
 
-    return name.includes(query) || code.includes(query);
+    return name.includes(query) || codes.some(code =>
+      String(code || "").toLowerCase().includes(query)
+    );
   });
 
-  grid.innerHTML = results.map(card => {
+  const visibleResults = results.slice(0, 60);
+  setStatus(
+    results.length
+      ? `Showing ${visibleResults.length} of ${results.length} matching ${results.length === 1 ? "card" : "cards"}.`
+      : `No cards found for "${search.value.trim()}". Try another name or set code.`,
+    `${results.length} ${results.length === 1 ? "result" : "results"}`
+  );
+
+  grid.innerHTML = visibleResults.map(card => {
     const image = getMarketplaceImage(card);
+    const code = getPrimaryCardCode(card);
 
     return `
-      <article class="card marketplace-card">
-        ${getCardImageMarkup(card, image, card.name || "Unknown card")}
-
-        <h3>${escapeHtml(card.name || "Unknown card")}</h3>
-
-        <button type="button"
-                class="btn primary"
-                data-card-id="${escapeHtml(String(card.id))}">
-          Add Listing
-        </button>
+      <article class="marketplace-card">
+        <div class="marketplace-card-art">
+          ${getCardImageMarkup(card, image, card.name || "Unknown card", "marketplace-card-image")}
+        </div>
+        <div class="marketplace-card-info">
+          <h3>${escapeHtml(card.name || "Unknown card")}</h3>
+          <p>${escapeHtml(code || "Card catalog entry")}</p>
+          <button type="button"
+                  class="btn primary"
+                  data-card-id="${escapeHtml(String(card.id))}">
+            List this card
+          </button>
+        </div>
       </article>
     `;
-  }).join("") || "<p>No cards found.</p>";
+  }).join("") || '<p class="marketplace-no-results">No matching cards.</p>';
   bindCardImageFallbacks(grid);
 }
 
@@ -5026,7 +5702,12 @@ document.addEventListener("keydown", event => {
   closeAppConfirm(false);
 });
 
+const banlistsReady = loadBanlists().then(() => {
+  setActiveBanlist(activeBanlist || "AE");
+});
+
 loadLocalCardDatabase()
+  .then(() => banlistsReady)
   .then(() => {
     populateCardFilters();
     renderDashboard();
@@ -5040,10 +5721,6 @@ loadLocalCardDatabase()
     console.error(error);
     renderCards();
   });
-
-loadBanlists().then(() => {
-  setActiveBanlist(activeBanlist || "AE");
-});
 
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   window.addEventListener("load", () => {
