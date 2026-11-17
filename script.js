@@ -516,6 +516,8 @@ const TCG_FEEDS = [
 ];
 const TCG_GLOBAL_FEED = "https://tcg-corner.com/products.json";
 const TCG_CORNER_CACHE_KEY = "ygoTCGCornerCards";
+const TCG_CORNER_CACHE_DB_NAME = "ygoCollectCache";
+const TCG_CORNER_CACHE_STORE_NAME = "catalogs";
 const BAKED_TCG_PRICES_FILE = "./tcgc-prices.json";
 const MAX_TCG_FEED_PAGES = 24;
 const PLAYERS_CLUB_PRICE_FILE = "./playersclub-prices.json";
@@ -528,6 +530,7 @@ const MAX_PLAYERS_CLUB_PAGES = 24;
 let bakedTCGPriceCatalogPromise = null;
 let bakedPlayersClubPriceCatalogPromise = null;
 let bakedPlayersClubOcgPriceCatalogPromise = null;
+let tcgCornerCacheDatabasePromise = null;
 let playersClubRefreshPromise = null;
 
 const TCGC_RAR = {
@@ -602,8 +605,34 @@ let cardDatabase = [];
 let decks = JSON.parse(localStorage.getItem("ygoDecks") || "[]");
 let deckCards = JSON.parse(localStorage.getItem("ygoDeckCards") || "{}");
 let deckCardOrder = JSON.parse(localStorage.getItem("ygoDeckCardOrder") || "{}");
+const DEFAULT_BINDER_ID = "default";
+const DEFAULT_BINDER = {
+  id: DEFAULT_BINDER_ID,
+  name: "Binder Collection",
+  description: "Your Yu-Gi-Oh! collection."
+};
+const savedBinderState = JSON.parse(localStorage.getItem("ygoBinders") || "null");
+let binders = Array.isArray(savedBinderState?.binders)
+  ? savedBinderState.binders
+  : [];
+if (!binders.some(binder => binder.id === DEFAULT_BINDER_ID)) {
+  binders.unshift({ ...DEFAULT_BINDER });
+}
+let activeBinderId = binders.some(
+  binder => binder.id === savedBinderState?.activeBinderId
+)
+  ? savedBinderState.activeBinderId
+  : DEFAULT_BINDER_ID;
+const binderCoverObjectUrls = new Map();
+let binderPreviewObjectUrl = "";
+let binderImageDatabasePromise = null;
 let activeDeck = "";
+let collectionPage = 1;
+let collectionPageCount = 1;
+const COLLECTION_PAGE_SIZE = 9;
 let cardDetailsSelectedDeck = "";
+let cardDetailsHistoryOpen = false;
+let currentAppPage = document.querySelector(".page.active")?.id || "dashboard";
 let selectedDeckCardId = "";
 let deckCardSearchTerm = "";
 let deckApiCards = [];
@@ -611,18 +640,46 @@ let deckApiLoading = false;
 let deckApiError = "";
 let deckSearchTimer;
 const deckSearchCache = new Map();
+const CARD_SEARCH_HISTORY_KEY = "ygoCardSearchHistory";
+const MAX_CARD_SEARCH_HISTORY = 12;
+let cardSearchHistoryTimer = null;
+let cardSearchHistoryOpen = false;
 
 
 function money(n) {
   return formatPrice(n);
 }
-function closeCardDetails() {
+function closeCardDetails(fromHistory = false) {
   cardDetailsRenderToken++;
   const panel = document.getElementById("cardDetailsPanel");
   const backdrop = document.getElementById("cardDetailsBackdrop");
   if (panel) panel.hidden = true;
   if (backdrop) backdrop.hidden = true;
+
+  const shouldGoBack = cardDetailsHistoryOpen && !fromHistory;
+  cardDetailsHistoryOpen = false;
+  if (shouldGoBack && window.history.state?.ygoCollectCardDetails) {
+    window.history.back();
+  }
 }
+
+function pushCardDetailsHistoryState() {
+  if (cardDetailsHistoryOpen) return;
+  const currentState = window.history.state;
+  const state = currentState && typeof currentState === "object"
+    ? currentState
+    : {};
+  window.history.pushState(
+    { ...state, ygoCollectCardDetails: true },
+    "",
+    window.location.href
+  );
+  cardDetailsHistoryOpen = true;
+}
+
+window.addEventListener("popstate", () => {
+  if (cardDetailsHistoryOpen) closeCardDetails(true);
+});
 
 const closeCardDetailsButton = document.getElementById("closeCardDetails");
 if (closeCardDetailsButton) closeCardDetailsButton.onclick = closeCardDetails;
@@ -675,12 +732,38 @@ function saveData() {
   localStorage.setItem("ygoDecks", JSON.stringify(decks));
   localStorage.setItem("ygoDeckCards", JSON.stringify(deckCards));
   localStorage.setItem("ygoDeckCardOrder", JSON.stringify(deckCardOrder));
+  localStorage.setItem("ygoBinders", JSON.stringify({ binders, activeBinderId }));
   getStoredCardImage.index = null;
 }
-function showPage(page) {
+function showPage(page, fromHistory = false) {
   const activePage = document.getElementById(page);
   if (!activePage || !activePage.classList.contains("page")) return;
 
+  const pageChanged = currentAppPage !== page;
+  const detailsPanel = document.getElementById("cardDetailsPanel");
+  const hadDetailsHistory = cardDetailsHistoryOpen;
+  if (pageChanged && currentAppPage === "decks" && page !== "decks") {
+    activeDeck = "";
+    renderDecks();
+  }
+  if (pageChanged && detailsPanel && !detailsPanel.hidden) {
+    closeCardDetails(true);
+  }
+  if (pageChanged && !fromHistory) {
+    const currentState = window.history.state;
+    const nextState = currentState && typeof currentState === "object"
+      ? { ...currentState }
+      : {};
+    delete nextState.ygoCollectCardDetails;
+    nextState.ygoCollectPage = page;
+    window.history[hadDetailsHistory ? "replaceState" : "pushState"](
+      nextState,
+      "",
+      window.location.href
+    );
+  }
+
+  currentAppPage = page;
   document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
   activePage.classList.add("active");
   document.querySelectorAll("nav button[data-page]").forEach(button => {
@@ -703,14 +786,339 @@ function showPage(page) {
 }
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => showPage(b.dataset.page));
 
+const initialHistoryState = window.history.state;
+const restoredPage = initialHistoryState?.ygoCollectPage;
+if (restoredPage && document.getElementById(restoredPage)?.classList.contains("page")) {
+  const cleanState = initialHistoryState && typeof initialHistoryState === "object"
+    ? { ...initialHistoryState }
+    : {};
+  delete cleanState.ygoCollectCardDetails;
+  cleanState.ygoCollectPage = restoredPage;
+  window.history.replaceState(cleanState, "", window.location.href);
+  if (restoredPage !== currentAppPage) showPage(restoredPage, true);
+} else {
+  const initialState = initialHistoryState && typeof initialHistoryState === "object"
+    ? { ...initialHistoryState }
+    : {};
+  delete initialState.ygoCollectCardDetails;
+  initialState.ygoCollectPage = currentAppPage;
+  window.history.replaceState(initialState, "", window.location.href);
+}
+
+window.addEventListener("popstate", event => {
+  if (cardDetailsHistoryOpen) closeCardDetails(true);
+
+  const page = event.state?.ygoCollectPage;
+  if (page && document.getElementById(page)?.classList.contains("page") &&
+      page !== currentAppPage) {
+    showPage(page, true);
+  }
+});
+
 function populatePurchaseDestinations() {
   const select = document.getElementById("purchaseDestination");
   const current = select.value;
   select.innerHTML = [
-    "<option>Binder Collection</option>",
+    ...binders.map(binder =>
+      `<option value="binder:${escapeHtml(binder.id)}">Binder: ${escapeHtml(binder.name)}</option>`
+    ),
     ...decks.map(deck => `<option>Deck: ${escapeHtml(deck)}</option>`)
   ].join("");
-  if ([...select.options].some(option => option.value === current)) select.value = current;
+  if ([...select.options].some(option => option.value === current)) {
+    select.value = current;
+  } else {
+    select.value = `binder:${activeBinderId}`;
+  }
+}
+
+function getActiveBinder() {
+  return binders.find(binder => binder.id === activeBinderId) || binders[0];
+}
+
+function getBinderDestination(binderId) {
+  const binder = binders.find(item => item.id === binderId) || getActiveBinder();
+  return binder.id === DEFAULT_BINDER_ID
+    ? "Binder Collection"
+    : `Binder: ${binder.name}`;
+}
+
+function createBinderId() {
+  return window.crypto?.randomUUID
+    ? window.crypto.randomUUID()
+    : `binder-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function openBinderImageDatabase() {
+  if (!window.indexedDB) {
+    return Promise.reject(new Error("IndexedDB is unavailable in this browser."));
+  }
+  if (binderImageDatabasePromise) return binderImageDatabasePromise;
+
+  binderImageDatabasePromise = new Promise((resolve, reject) => {
+    const request = window.indexedDB.open("ygoCollectBinderImages", 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains("images")) {
+        request.result.createObjectStore("images", { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => {
+      const database = request.result;
+      database.onversionchange = () => {
+        database.close();
+        binderImageDatabasePromise = null;
+      };
+      resolve(database);
+    };
+    request.onerror = () => {
+      reject(request.error || new Error("Unable to open binder image storage."));
+    };
+  }).catch(error => {
+    binderImageDatabasePromise = null;
+    throw error;
+  });
+  return binderImageDatabasePromise;
+}
+
+async function storeBinderImage(id, image) {
+  const database = await openBinderImageDatabase();
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction("images", "readwrite");
+    transaction.objectStore("images").put({ id, image });
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => {
+      reject(transaction.error || new Error("Unable to save the binder cover photo."));
+    };
+    transaction.onabort = () => {
+      reject(transaction.error || new Error("Saving the binder cover photo was aborted."));
+    };
+  });
+}
+
+async function readBinderImage(id) {
+  const database = await openBinderImageDatabase();
+  return new Promise((resolve, reject) => {
+    const request = database.transaction("images", "readonly")
+      .objectStore("images")
+      .get(id);
+    request.onsuccess = () => resolve(request.result?.image || null);
+    request.onerror = () => {
+      reject(request.error || new Error("Unable to read the binder cover photo."));
+    };
+  });
+}
+
+async function deleteBinderImage(id) {
+  const database = await openBinderImageDatabase();
+  await new Promise((resolve, reject) => {
+    const transaction = database.transaction("images", "readwrite");
+    transaction.objectStore("images").delete(id);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => {
+      reject(transaction.error || new Error("Unable to remove the saved binder cover."));
+    };
+    transaction.onabort = () => {
+      reject(transaction.error || new Error("Removing the saved binder cover was aborted."));
+    };
+  });
+}
+
+function getBinderBackgroundUrl(value) {
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:"
+      ? url.href
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+function updateBinderCoverPreview() {
+  const image = document.getElementById("binderCoverPreviewImage");
+  const file = document.getElementById("binderBackgroundFile").files[0];
+  if (binderPreviewObjectUrl) {
+    URL.revokeObjectURL(binderPreviewObjectUrl);
+    binderPreviewObjectUrl = "";
+  }
+
+  image.hidden = true;
+  image.removeAttribute("src");
+  if (file) {
+    binderPreviewObjectUrl = URL.createObjectURL(file);
+    image.src = binderPreviewObjectUrl;
+    image.hidden = false;
+    return;
+  }
+
+  const url = getBinderBackgroundUrl(
+    document.getElementById("binderBackgroundUrl").value.trim()
+  );
+  if (url) {
+    image.src = url;
+    image.hidden = false;
+  }
+}
+
+function openCreateBinder() {
+  document.getElementById("createBinderForm").reset();
+  document.getElementById("createBinderModal").classList.add("open");
+  updateBinderCoverPreview();
+  document.getElementById("binderNameInput").focus();
+}
+
+function closeCreateBinder() {
+  document.getElementById("createBinderModal").classList.remove("open");
+  document.getElementById("createBinderForm").reset();
+  updateBinderCoverPreview();
+}
+
+async function saveBinder() {
+  const nameInput = document.getElementById("binderNameInput");
+  const name = nameInput.value.trim();
+  const description = document.getElementById("binderDescriptionInput").value.trim();
+  const file = document.getElementById("binderBackgroundFile").files[0];
+  const typedUrl = document.getElementById("binderBackgroundUrl").value.trim();
+
+  if (!name) {
+    showAppAlert("Enter a name for this binder.");
+    nameInput.focus();
+    return;
+  }
+  if (binders.some(binder => binder.name.toLowerCase() === name.toLowerCase())) {
+    showAppAlert("A binder with that name already exists.");
+    nameInput.focus();
+    return;
+  }
+  if (file && typedUrl) {
+    showAppAlert("Choose either an uploaded photo or an image URL, not both.");
+    return;
+  }
+  if (file && (!["image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type) ||
+      file.size > 10 * 1024 * 1024)) {
+    showAppAlert("Choose a JPEG, PNG, WebP, or GIF image under 10 MB.");
+    return;
+  }
+
+  const backgroundUrl = getBinderBackgroundUrl(typedUrl);
+  if (typedUrl && !backgroundUrl) {
+    showAppAlert("Enter a valid HTTP or HTTPS image URL.");
+    return;
+  }
+
+  const id = createBinderId();
+  const binder = {
+    id,
+    name,
+    description,
+    backgroundUrl,
+    coverImageId: file ? id : ""
+  };
+  if (file) {
+    try {
+      await storeBinderImage(id, file);
+    } catch (error) {
+      console.error("Unable to save the binder cover photo:", error);
+      showAppAlert(`Unable to save the cover photo: ${error.message}`);
+      return;
+    }
+  }
+
+  const previousBinderId = activeBinderId;
+  binders.push(binder);
+  activeBinderId = binder.id;
+  try {
+    localStorage.setItem("ygoBinders", JSON.stringify({ binders, activeBinderId }));
+  } catch (error) {
+    binders = binders.filter(item => item.id !== binder.id);
+    activeBinderId = previousBinderId;
+    console.error("Unable to save binder details:", error);
+    if (file) {
+      try {
+        await deleteBinderImage(id);
+      } catch (cleanupError) {
+        console.error("Unable to clean up the unsaved binder cover photo:", cleanupError);
+      }
+    }
+    showAppAlert(`Unable to save this binder: ${error.message}`);
+    return;
+  }
+
+  closeCreateBinder();
+  populatePurchaseDestinations();
+  renderCollection();
+}
+
+function selectCollectionBinder(binderId) {
+  if (!binders.some(binder => binder.id === binderId)) return;
+  const previousBinderId = activeBinderId;
+  activeBinderId = binderId;
+  try {
+    localStorage.setItem("ygoBinders", JSON.stringify({ binders, activeBinderId }));
+  } catch (error) {
+    activeBinderId = previousBinderId;
+    document.getElementById("collectionBinderSelect").value = previousBinderId;
+    console.error("Unable to save the selected binder:", error);
+    showAppAlert(`Unable to save the selected binder: ${error.message}`);
+    return;
+  }
+
+  clearCollectionFilterControls();
+  collectionPage = 1;
+  renderCollection();
+}
+
+function renderBinderCover(binder) {
+  const cover = document.getElementById("collectionBinderCover");
+  const image = document.getElementById("collectionBinderCoverImage");
+  document.getElementById("collectionBinderName").textContent = binder.name;
+  document.getElementById("collectionBinderDescription").textContent =
+    binder.description || "Your Yu-Gi-Oh! collection.";
+
+  const coverKey = binder.backgroundUrl
+    ? `${binder.id}|url:${binder.backgroundUrl}`
+    : binder.coverImageId
+      ? `${binder.id}|id:${binder.coverImageId}`
+      : `${binder.id}|none`;
+  if (cover.dataset.coverKey === coverKey) return;
+
+  cover.dataset.binderId = binder.id;
+  cover.dataset.coverKey = coverKey;
+  image.onload = null;
+  image.onerror = null;
+  image.hidden = true;
+  image.removeAttribute("src");
+
+  if (binder.backgroundUrl) {
+    image.onload = () => {
+      if (cover.dataset.binderId === binder.id) image.hidden = false;
+    };
+    image.onerror = () => {
+      if (cover.dataset.binderId === binder.id) image.hidden = true;
+      console.error(`Unable to load the cover image for binder "${binder.name}".`);
+    };
+    image.src = binder.backgroundUrl;
+    return;
+  }
+
+  if (binder.coverImageId) {
+    void readBinderImage(binder.coverImageId)
+      .then(blob => {
+        if (!blob) throw new Error("The saved cover photo could not be found.");
+        if (!binderCoverObjectUrls.has(binder.coverImageId)) {
+          binderCoverObjectUrls.set(
+            binder.coverImageId,
+            URL.createObjectURL(blob)
+          );
+        }
+        if (cover.dataset.binderId !== binder.id) return;
+        image.src = binderCoverObjectUrls.get(binder.coverImageId);
+        image.hidden = false;
+      })
+      .catch(error => {
+        console.error(`Unable to load the cover image for binder "${binder.name}":`, error);
+      });
+  }
 }
 
 function populateCardDetailsDeckOptions() {
@@ -1937,7 +2345,6 @@ async function loadMoreRulings() {
 }
 
 function showRulingsForCard(card) {
-  closeCardDetails();
   showPage("rulings");
   selectRulingCard(card);
 }
@@ -2084,6 +2491,7 @@ async function showCardDetails(card) {
   panel.dataset.cardId = String(card.id);
   renderCardDetailsInventory(card);
   renderCardWishlist(card);
+  if (panel.hidden) pushCardDetailsHistoryState();
   const viewRulingsButton = document.getElementById("viewCardRulings");
   if (viewRulingsButton) {
     viewRulingsButton.onclick = () => showRulingsForCard(card);
@@ -2853,22 +3261,82 @@ async function deletePurchase(purchaseId) {
   }
 }
 
-async function deleteCollectionGroup(cardId, printing, destination) {
-  const matching = purchases.filter(purchase =>
-    String(purchase.cardId) === String(cardId) &&
-    getPurchasePrintingLabel(purchase) === printing &&
-    (purchase.destination || "Binder Collection") === destination
-  );
-  if (!matching.length || !await showAppConfirm(`Delete all ${matching.reduce((sum, purchase) => sum + purchase.qty, 0)} copies of this card?`)) return;
-  purchases = purchases.filter(purchase => !matching.includes(purchase));
-  if (destination.startsWith("Deck: ")) {
-    removeQuantityFromDeck(
-      destination.slice("Deck: ".length),
-      cardId,
-      matching.reduce((sum, purchase) => sum + getPurchaseDeckQuantity(purchase), 0),
-      matching[0]?.card
-    );
-  }
+async function deleteCollectionGroup(
+  cardId,
+  printing,
+  destination,
+  binderId = activeBinderId
+) {
+  const matching = [];
+  let matchingCount = 0;
+  purchases.forEach((purchase, purchaseIndex) => {
+    if (
+      String(purchase.cardId) !== String(cardId) ||
+      getPurchasePrintingLabel(purchase) !== printing
+    ) return;
+
+    const binderIds = getPurchaseCopyBinderIds(purchase);
+    const destinations = getPurchaseCopyDestinations(purchase);
+    const copyIndexes = binderIds.reduce((indexes, copyBinderId, copyIndex) => {
+      if (copyBinderId === binderId && destinations[copyIndex] === destination) {
+        indexes.push(copyIndex);
+      }
+      return indexes;
+    }, []);
+    if (copyIndexes.length) {
+      matching.push({ purchase, purchaseIndex, copyIndexes });
+      matchingCount += copyIndexes.length;
+    }
+  });
+  if (!matchingCount || !await showAppConfirm(`Delete all ${matchingCount} copies of this card?`)) return;
+
+  matching.sort((a, b) => b.purchaseIndex - a.purchaseIndex);
+  matching.forEach(({ purchase, purchaseIndex, copyIndexes }) => {
+    const quantity = Math.max(0, Math.floor(Number(purchase.qty) || 0));
+    const total = Number(purchase.total);
+    const unitTotal = getPurchaseCopyTotal(purchase, quantity || 1);
+    const binderIds = getPurchaseCopyBinderIds(purchase);
+    const destinations = getPurchaseCopyDestinations(purchase);
+
+    copyIndexes.sort((a, b) => b - a).forEach(copyIndex => {
+      const copyDestination = destinations[copyIndex];
+      if (copyDestination.startsWith("Deck: ")) {
+        const deckQuantity = Math.min(
+          1,
+          Math.max(0, Math.floor(getPurchaseDeckQuantity(purchase)))
+        );
+        if (deckQuantity) {
+          removeQuantityFromDeck(
+            copyDestination.slice("Deck: ".length),
+            purchase.cardId,
+            deckQuantity,
+            purchase.card
+          );
+          if (purchase.deckQuantityAdded != null) {
+            purchase.deckQuantityAdded = Math.max(
+              0,
+              Number(purchase.deckQuantityAdded) - deckQuantity
+            );
+          }
+        }
+      }
+      binderIds.splice(copyIndex, 1);
+      destinations.splice(copyIndex, 1);
+    });
+
+    if (copyIndexes.length >= quantity) {
+      purchases.splice(purchaseIndex, 1);
+      return;
+    }
+
+    purchase.qty = quantity - copyIndexes.length;
+    purchase.total = Number.isFinite(total)
+      ? total - unitTotal * copyIndexes.length
+      : purchase.qty * (Number(purchase.price) || 0);
+    purchase.copyBinderIds = binderIds;
+    purchase.copyDestinations = destinations;
+  });
+
   saveData();
   renderDashboard();
   renderCollection();
@@ -2891,6 +3359,7 @@ function openPurchase() {
     return;
   }
   populatePurchaseDestinations();
+  document.getElementById("purchaseDestination").value = `binder:${activeBinderId}`;
   const groups = new Map();
   cards.forEach(card => {
     const key = `${card.sourceName || "TCG Corner"}|${card.sourceLanguage}|${card.cardCode || card.productId}`;
@@ -3052,25 +3521,32 @@ function getCardDetailsPurchaseGroups(card) {
     if (String(purchase.cardId) !== cardId && purchaseName !== cardName) return;
 
     const printing = getPurchasePrintingLabel(purchase);
-    const destination = purchase.destination || "Binder Collection";
-    const key = `${purchase.cardId}|${printing}|${destination}`;
-    if (!groups.has(key)) {
-      groups.set(key, {
-        cardId: String(purchase.cardId),
-        printing,
-        destination,
-        quantity: 0,
-        total: 0,
-        sourceName: getPurchaseSourceName(purchase)
-      });
-    }
+    const quantity = Math.max(0, Math.floor(Number(purchase.qty) || 0));
+    if (!quantity) return;
+    const binderIds = getPurchaseCopyBinderIds(purchase);
+    const destinations = getPurchaseCopyDestinations(purchase);
+    const unitTotal = getPurchaseCopyTotal(purchase, quantity);
 
-    const group = groups.get(key);
-    const quantity = Number(purchase.qty) || 0;
-    group.quantity += quantity;
-    group.total += Number.isFinite(Number(purchase.total))
-      ? Number(purchase.total)
-      : (Number(purchase.price) || 0) * quantity;
+    for (let copyIndex = 0; copyIndex < quantity; copyIndex += 1) {
+      const binderId = binderIds[copyIndex];
+      const destination = destinations[copyIndex];
+      const key = `${binderId}|${purchase.cardId}|${printing}|${destination}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          cardId: String(purchase.cardId),
+          binderId,
+          printing,
+          destination,
+          quantity: 0,
+          total: 0,
+          sourceName: getPurchaseSourceName(purchase)
+        });
+      }
+
+      const group = groups.get(key);
+      group.quantity += 1;
+      group.total += unitTotal;
+    }
   });
 
   return [...groups.values()];
@@ -3096,6 +3572,7 @@ function renderCardDetailsInventory(card) {
             data-card-id="${escapeHtml(group.cardId)}"
             data-printing="${escapeHtml(group.printing)}"
             data-destination="${escapeHtml(group.destination)}"
+            data-binder-id="${escapeHtml(group.binderId)}"
             aria-label="Remove all ${group.quantity} copies of ${escapeHtml(group.printing)}">
             Clear
           </button>
@@ -3204,7 +3681,8 @@ document.getElementById("cardDetailsCopies")
     void deleteCollectionGroup(
       button.dataset.cardId,
       button.dataset.printing,
-      button.dataset.destination
+      button.dataset.destination,
+      button.dataset.binderId || DEFAULT_BINDER_ID
     );
   });
 
@@ -3212,16 +3690,25 @@ function savePurchase() {
   const card = cards.find(c => c.id == document.getElementById("purchaseRarity").value);
   const qty = Number(document.getElementById("purchaseQty").value);
   const price = Number(document.getElementById("purchasePrice").value);
-  let destination = document.getElementById("purchaseDestination").value;
+  const destinationChoice = document.getElementById("purchaseDestination").value;
+  let binderId = activeBinderId;
+  let destination = destinationChoice;
   let deckQuantityAdded = 0;
   if (!card || !Number.isInteger(qty) || qty < 1 || !Number.isFinite(price) || price < 0) {
     showAppAlert("Enter a valid card, whole-number quantity, and non-negative price.");
     return;
   }
+  if (destinationChoice.startsWith("binder:")) {
+    const selectedBinderId = destinationChoice.slice("binder:".length);
+    if (binders.some(binder => binder.id === selectedBinderId)) {
+      binderId = selectedBinderId;
+    }
+    destination = getBinderDestination(binderId);
+  }
   if (destination.startsWith("Deck: ")) {
     const deckName = destination.slice("Deck: ".length);
     if (!decks.includes(deckName)) {
-      destination = "Binder Collection";
+      destination = getBinderDestination(binderId);
     } else {
       const result = addPurchasedCardToDeck(
         deckName,
@@ -3233,9 +3720,9 @@ function savePurchase() {
       if (result === "added") {
         deckQuantityAdded = qty;
       } else if (result !== "updated") {
-        destination = "Binder Collection";
+        destination = getBinderDestination(binderId);
         if (result === "invalid") {
-          showAppAlert("The purchase was recorded in Binder Collection because its card printing could not be added to the deck.");
+          showAppAlert(`The purchase was recorded in ${destination} because its card printing could not be added to the deck.`);
         }
       }
     }
@@ -3254,6 +3741,9 @@ function savePurchase() {
     set: getSetCode(card.cardCode) || card.cardCode || "Unknown set",
     rarity: card.rarity || "Unknown rarity",
     destination,
+    binderId,
+    copyBinderIds: Array(qty).fill(binderId),
+    copyDestinations: Array(qty).fill(destination),
     deckQuantityAdded,
     qty,
     price,
@@ -3269,15 +3759,95 @@ function savePurchase() {
 
 function collectionRows() {
   const map = {};
-  purchases.forEach(p => {
-    const destination = p.destination || "Binder Collection";
+  purchases.forEach((p, purchaseIndex) => {
+    const quantity = Math.max(0, Math.floor(Number(p.qty) || 0));
+    if (!quantity) return;
+    const copyBinderIds = getPurchaseCopyBinderIds(p);
+    const copyDestinations = getPurchaseCopyDestinations(p);
+    const unitPaid = getPurchaseCopyTotal(p, quantity);
     const printing = getPurchasePrintingLabel(p);
-    const key = p.cardId + "|" + printing + "|" + destination;
-    if(!map[key]) map[key] = {cardId:p.cardId,card:p.card,image:p.image || "",printing,destination,qty:0,paid:0};
-    map[key].qty += Number(p.qty || 0);
-    map[key].paid += p.total;
+    const cardRecord = cards.find(
+      card => String(card.id) === String(p.cardId)
+    ) || localCardDatabase.find(
+      card => String(card.name || "").trim().toLowerCase() ===
+        String(p.card || "").trim().toLowerCase()
+    );
+    const set = p.set || getSetCode(cardRecord?.cardCode) ||
+      cardRecord?.cardCode || "Unknown set";
+    const rarity = p.rarity || cardRecord?.rarity || "Unknown rarity";
+
+    for (let copyIndex = 0; copyIndex < quantity; copyIndex += 1) {
+      const binderId = copyBinderIds[copyIndex];
+      const destination = copyDestinations[copyIndex];
+      const key = binderId + "|" + p.cardId + "|" + printing + "|" + destination;
+      if (!map[key]) {
+        map[key] = {
+          binderId,
+          cardId: p.cardId,
+          card: p.card,
+          image: p.image || "",
+          printing,
+          set,
+          rarity,
+          destination,
+          qty: 0,
+          paid: 0,
+          latestDate: p.date || "",
+          sourceCopies: []
+        };
+      }
+      map[key].qty += 1;
+      map[key].paid += unitPaid;
+      map[key].sourceCopies.push({ purchaseIndex, copyIndex });
+      if (String(p.date || "") > String(map[key].latestDate || "")) {
+        map[key].latestDate = p.date || "";
+      }
+    }
   });
   return Object.values(map);
+}
+
+function getPurchaseCopyBinderIds(purchase) {
+  const quantity = Math.max(0, Math.floor(Number(purchase.qty) || 0));
+  const defaultBinderId = binders.some(binder => binder.id === purchase.binderId)
+    ? purchase.binderId
+    : DEFAULT_BINDER_ID;
+  const savedBinderIds = Array.isArray(purchase.copyBinderIds)
+    ? purchase.copyBinderIds
+    : [];
+
+  return Array.from({ length: quantity }, (_, index) => {
+    const binderId = savedBinderIds[index];
+    return binders.some(binder => binder.id === binderId)
+      ? binderId
+      : defaultBinderId;
+  });
+}
+
+function getPurchaseCopyDestinations(purchase) {
+  const quantity = Math.max(0, Math.floor(Number(purchase.qty) || 0));
+  const defaultBinderId = binders.some(binder => binder.id === purchase.binderId)
+    ? purchase.binderId
+    : DEFAULT_BINDER_ID;
+  const defaultDestination = purchase.destination || getBinderDestination(defaultBinderId);
+  const savedDestinations = Array.isArray(purchase.copyDestinations)
+    ? purchase.copyDestinations
+    : [];
+
+  return Array.from({ length: quantity }, (_, index) => {
+    const destination = savedDestinations[index];
+    return typeof destination === "string" && destination
+      ? destination
+      : defaultDestination;
+  });
+}
+
+function getCollectionCardType(card) {
+  const type = String(card?.type || "").toLowerCase();
+  if (type.includes("monster")) return "Monster";
+  if (type.includes("spell")) return "Spell";
+  if (type.includes("trap")) return "Trap";
+  return type ? "Other" : "Unknown";
 }
 
 function renderDashboard() {
@@ -3304,80 +3874,312 @@ function renderDashboard() {
   ).join("") || `<tr><td colspan="7" class="empty">No purchases yet.</td></tr>`;
 }
 
+function changeCollectionView() {
+  collectionPage = 1;
+  renderCollection();
+}
+
+function clearCollectionFilterControls() {
+  const search = document.getElementById("collectionSearch");
+  if (search) search.value = "";
+  [
+    "collectionTypeFilter",
+    "collectionSetFilter",
+    "collectionRarityFilter"
+  ].forEach(id => {
+    const select = document.getElementById(id);
+    if (select) select.value = "all";
+  });
+}
+
+function changeCollectionPage(offset) {
+  collectionPage = Math.max(1, Math.min(collectionPageCount, collectionPage + offset));
+  renderCollection();
+}
+
+function clearCollectionFilters() {
+  clearCollectionFilterControls();
+  changeCollectionView();
+}
+
 function renderCollection() {
-  const q = document
-    .getElementById("collectionSearch")
-    .value
-    .toLowerCase();
+  const search = document.getElementById("collectionSearch");
+  const typeFilter = document.getElementById("collectionTypeFilter");
+  const setFilter = document.getElementById("collectionSetFilter");
+  const rarityFilter = document.getElementById("collectionRarityFilter");
+  const sort = document.getElementById("collectionSort");
+  const binderSelect = document.getElementById("collectionBinderSelect");
+  const table = document.getElementById("collectionTable");
+  const activeBinder = getActiveBinder();
+  activeBinderId = activeBinder.id;
+  binderSelect.innerHTML = binders.map(binder =>
+    `<option value="${escapeHtml(binder.id)}">${escapeHtml(binder.name)}</option>`
+  ).join("");
+  binderSelect.value = activeBinder.id;
+  renderBinderCover(activeBinder);
 
-  const rows = collectionRows()
-    .filter(r =>
-      r.card.toLowerCase().includes(q)
+  const q = search.value.trim().toLowerCase();
+  const allRows = collectionRows()
+    .filter(row => row.binderId === activeBinder.id);
+
+  const rowsWithCardData = allRows.map(row => {
+    const localCard = localCardDatabase.find(
+      item => String(item.name || "").trim().toLowerCase() ===
+        String(row.card || "").trim().toLowerCase()
     );
+    const card = cards.find(
+      item => String(item.id) === String(row.cardId)
+    ) || localCard;
+    return {
+      ...row,
+      cardRecord: card,
+      filterCardRecord: localCard || card,
+      cardType: getCollectionCardType(localCard || card),
+      market: (Number(card?.price) || 0) * row.qty
+    };
+  });
+  populateCardFilter(
+    "collectionTypeFilter",
+    rowsWithCardData.map(row => row.cardType),
+    "All types"
+  );
+  populateCardFilter(
+    "collectionSetFilter",
+    rowsWithCardData.map(row => row.set),
+    "All sets"
+  );
+  populateCardFilter(
+    "collectionRarityFilter",
+    rowsWithCardData.map(row => row.rarity),
+    "All rarities"
+  );
 
-  document.getElementById("collectionTable").innerHTML =
-    rows.map(r => {
+  const selectedType = typeFilter.value;
+  const selectedSet = setFilter.value;
+  const selectedRarity = rarityFilter.value;
+  document.getElementById("collectionClearFilters").disabled =
+    !q && selectedType === "all" && selectedSet === "all" && selectedRarity === "all";
+  let rows = rowsWithCardData.filter(row => {
+    const searchableText = [
+      row.card,
+      row.printing,
+      row.set,
+      row.rarity,
+      row.filterCardRecord?.type,
+      row.filterCardRecord?.attribute,
+      row.filterCardRecord?.race
+    ].join(" ").toLowerCase();
+    return (!q || searchableText.includes(q)) &&
+      (selectedType === "all" || row.cardType === selectedType) &&
+      (selectedSet === "all" || row.set === selectedSet) &&
+      (selectedRarity === "all" || row.rarity === selectedRarity);
+  });
 
-      const card = cards.find(
-        c => String(c.id) === String(r.cardId)
-      ) || localCardDatabase.find(
-        c => String(c.name || "").trim().toLowerCase() === String(r.card || "").trim().toLowerCase()
-      );
+  if (sort.value === "copies") {
+    rows.sort((a, b) => b.qty - a.qty || a.card.localeCompare(b.card));
+  } else if (sort.value === "value") {
+    rows.sort((a, b) => b.market - a.market || a.card.localeCompare(b.card));
+  } else if (sort.value === "recent") {
+    rows.sort((a, b) =>
+      String(b.latestDate || "").localeCompare(String(a.latestDate || "")) ||
+      a.card.localeCompare(b.card)
+    );
+  } else {
+    rows.sort((a, b) =>
+      a.card.localeCompare(b.card) ||
+      a.printing.localeCompare(b.printing) ||
+      a.destination.localeCompare(b.destination)
+    );
+  }
 
-      const market =
-        (card?.price || 0) * r.qty;
+  const copies = rows.flatMap(row =>
+    row.sourceCopies.map(copy => ({
+      ...row,
+      qty: 1,
+      market: Number(row.cardRecord?.price) || 0,
+      ...copy
+    }))
+  );
 
-      return `
-        <div
-          class="collection-card-tile"
-          data-card-id="${escapeHtml(card?.id || r.cardId)}"
-          data-card-name="${escapeHtml(r.card)}"
-        >
+  document.getElementById("collectionEntryCount").textContent =
+    rows.length.toLocaleString();
+  document.getElementById("collectionCopyCount").textContent =
+    rows.reduce((sum, row) => sum + row.qty, 0).toLocaleString();
+  document.getElementById("collectionMarketValue").textContent =
+    money(rows.reduce((sum, row) => sum + row.market, 0));
 
-          ${getCardImageMarkup(card, r.image, r.card, "", cardTooltipAttributes(card, card?.rarity))}
-
-          <span
-            class="collection-card-quantity"
-            title="Owned quantity"
+  collectionPageCount = Math.max(1, Math.ceil(copies.length / COLLECTION_PAGE_SIZE));
+  collectionPage = Math.min(collectionPage, collectionPageCount);
+  const start = (collectionPage - 1) * COLLECTION_PAGE_SIZE;
+  const visibleCopies = copies.slice(start, start + COLLECTION_PAGE_SIZE);
+  const emptyLabel = allRows.length
+    ? "No cards match these filters."
+    : "This binder is empty.";
+  const cardMarkup = visibleCopies.map(row => {
+    const moveOptions = binders
+      .filter(binder => binder.id !== row.binderId)
+      .map(binder =>
+        `<option value="${escapeHtml(binder.id)}">${escapeHtml(binder.name)}</option>`
+      )
+      .join("");
+    return `
+    <div
+      class="collection-card-tile"
+      data-card-id="${escapeHtml(row.cardRecord?.id || row.cardId)}"
+      data-card-name="${escapeHtml(row.card)}"
+    >
+      ${getCardImageMarkup(
+        row.cardRecord,
+        row.image,
+        row.card,
+        "",
+        cardTooltipAttributes(row.cardRecord, row.cardRecord?.rarity)
+      )}
+      <button
+        class="collection-card-delete"
+        title="Remove one copy"
+        aria-label="Remove one copy of ${escapeHtml(row.card)} from collection"
+        data-purchase-index="${row.purchaseIndex}"
+        data-copy-index="${row.copyIndex}"
+        onclick="deleteCollectionCopyFromControl(this)"
+      >×</button>
+      <div class="collection-card-details">
+        <strong>${escapeHtml(row.card)}</strong>
+        <small>${escapeHtml(row.printing)} · ${escapeHtml(row.destination)} · ${money(row.market)}</small>
+        ${moveOptions ? `
+          <select
+            class="collection-card-move"
+            aria-label="Move one copy of ${escapeHtml(row.card)} to another binder"
+            data-purchase-index="${row.purchaseIndex}"
+            data-copy-index="${row.copyIndex}"
+            onchange="moveCollectionCopyFromControl(this)"
           >
-            ${r.qty}
-          </span>
-
-          <button
-            class="collection-card-delete"
-            title="Delete card"
-            onclick="deleteCollectionGroup(
-              '${escapeHtml(r.cardId)}',
-              '${escapeHtml(r.printing)}',
-              '${escapeHtml(r.destination)}'
-            )"
-          >
-            ×
-          </button>
-
-          <div class="collection-card-details">
-            <strong>${escapeHtml(r.card)}</strong>
-            <small>
-              ${escapeHtml(r.printing)}
-              ·
-              ${escapeHtml(r.destination)}
-              ·
-              ${money(market)}
-            </small>
-          </div>
-
-        </div>
-      `;
-    }).join("") ||
-    `
-      <div
-        class="empty"
-        style="grid-column:1/-1;"
-      >
-        No cards in your collection.
+            <option value="">Move to binder...</option>
+            ${moveOptions}
+          </select>
+        ` : ""}
       </div>
+    </div>
     `;
-  bindCardImageFallbacks(document.getElementById("collectionTable"));
+  });
+  const emptySlots = Array.from(
+    { length: COLLECTION_PAGE_SIZE - visibleCopies.length },
+    (_, index) => {
+      if (!rows.length && collectionPage === 1 && index === 0) {
+        return `<div class="collection-empty-pocket collection-empty-message">
+          <strong>${emptyLabel}</strong>
+          <span>${allRows.length ? "Try a different search or location." : "Cards you add will appear here."}</span>
+          ${allRows.length ? '<button type="button" class="btn" onclick="clearCollectionFilters()">Clear filters</button>' : ""}
+        </div>`;
+      }
+      return '<div class="collection-empty-pocket" aria-hidden="true"></div>';
+    }
+  );
+  table.innerHTML = [...cardMarkup, ...emptySlots].join("");
+  bindCardImageFallbacks(table);
+
+  const shownStart = copies.length ? start + 1 : 0;
+  const shownEnd = Math.min(start + visibleCopies.length, copies.length);
+  document.getElementById("collectionPageStatus").textContent =
+    `Page ${collectionPage} of ${collectionPageCount} · ${shownStart}-${shownEnd} of ${copies.length}`;
+  document.getElementById("collectionPreviousPage").disabled = collectionPage <= 1;
+  document.getElementById("collectionNextPage").disabled =
+    collectionPage >= collectionPageCount;
+}
+
+function getPurchaseCopyTotal(purchase, quantity) {
+  const total = Number(purchase.total);
+  return Number.isFinite(total)
+    ? total / quantity
+    : Number(purchase.price) || 0;
+}
+
+async function deleteCollectionCopyFromControl(button) {
+  const purchaseIndex = Number(button.dataset.purchaseIndex);
+  const copyIndex = Number(button.dataset.copyIndex);
+  if (!Number.isInteger(purchaseIndex) || !purchases[purchaseIndex]) return;
+
+  const purchase = purchases[purchaseIndex];
+  const quantity = Math.max(0, Math.floor(Number(purchase.qty) || 0));
+  if (!Number.isInteger(copyIndex) || copyIndex < 0 || copyIndex >= quantity) return;
+  if (!await showAppConfirm(`Remove one copy of ${purchase.card} from this binder?`)) return;
+
+  const total = Number(purchase.total);
+  const copyTotal = getPurchaseCopyTotal(purchase, quantity);
+  const copyBinderIds = getPurchaseCopyBinderIds(purchase);
+  const copyDestinations = getPurchaseCopyDestinations(purchase);
+  const destination = copyDestinations[copyIndex];
+  const deckQuantity = destination.startsWith("Deck: ")
+    ? Math.min(1, Math.max(0, Math.floor(getPurchaseDeckQuantity(purchase))))
+    : 0;
+
+  if (deckQuantity) {
+    removeQuantityFromDeck(
+      destination.slice("Deck: ".length),
+      purchase.cardId,
+      deckQuantity,
+      purchase.card
+    );
+  }
+
+  copyBinderIds.splice(copyIndex, 1);
+  copyDestinations.splice(copyIndex, 1);
+  if (quantity > 1) {
+    purchase.qty = quantity - 1;
+    purchase.total = Number.isFinite(total)
+      ? total - copyTotal
+      : purchase.qty * (Number(purchase.price) || 0);
+    purchase.copyBinderIds = copyBinderIds;
+    purchase.copyDestinations = copyDestinations;
+    if (purchase.deckQuantityAdded != null && deckQuantity) {
+      purchase.deckQuantityAdded = Math.max(
+        0,
+        Number(purchase.deckQuantityAdded) - deckQuantity
+      );
+    }
+  } else {
+    purchases.splice(purchaseIndex, 1);
+  }
+
+  saveData();
+  renderDashboard();
+  renderCollection();
+  renderSpending();
+  renderDecks();
+  const detailsPanel = document.getElementById("cardDetailsPanel");
+  if (detailsPanel && !detailsPanel.hidden) {
+    const detailCard = localCardDatabase.find(
+      card => String(card.id) === detailsPanel.dataset.cardId
+    );
+    if (detailCard) renderCardDetailsInventory(detailCard);
+  }
+}
+
+function moveCollectionCopyFromControl(select) {
+  const targetBinderId = select.value;
+  if (!binders.some(binder => binder.id === targetBinderId)) return;
+  const purchaseIndex = Number(select.dataset.purchaseIndex);
+  if (!Number.isInteger(purchaseIndex) || !purchases[purchaseIndex]) return;
+  const copyIndex = Number(select.dataset.copyIndex);
+
+  const purchase = purchases[purchaseIndex];
+  const quantity = Math.max(0, Math.floor(Number(purchase.qty) || 0));
+  if (!Number.isInteger(copyIndex) || copyIndex < 0 || copyIndex >= quantity) return;
+  const copyBinderIds = getPurchaseCopyBinderIds(purchase);
+  const copyDestinations = getPurchaseCopyDestinations(purchase);
+  const sourceBinderId = copyBinderIds[copyIndex];
+  if (sourceBinderId === targetBinderId) return;
+
+  copyBinderIds[copyIndex] = targetBinderId;
+  if (!copyDestinations[copyIndex].startsWith("Deck: ")) {
+    copyDestinations[copyIndex] = getBinderDestination(targetBinderId);
+  }
+  purchase.copyBinderIds = copyBinderIds;
+  purchase.copyDestinations = copyDestinations;
+
+  saveData();
+  renderDashboard();
+  renderCollection();
 }
 
 function queuePurchaseMatchRender(type) {
@@ -3559,6 +4361,158 @@ function queueCardRender() {
   cardRenderTimer = setTimeout(renderCards, 180);
 }
 
+function getCardSearchHistory() {
+  try {
+    const history = JSON.parse(localStorage.getItem(CARD_SEARCH_HISTORY_KEY) || "[]");
+    return Array.isArray(history)
+      ? history.filter(term => typeof term === "string" && term.trim())
+      : [];
+  } catch (error) {
+    console.warn("Unable to read card search history:", error);
+    return [];
+  }
+}
+
+function renderCardSearchHistory() {
+  const historyList = document.getElementById("cardSearchHistory");
+  const input = document.getElementById("cardSearch");
+  if (!historyList || !input) return;
+  if (!cardSearchHistoryOpen) {
+    historyList.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    return;
+  }
+
+  const query = input.value.trim().toLowerCase();
+  const savedHistory = getCardSearchHistory();
+  const history = savedHistory
+    .filter(term => !query || term.toLowerCase().includes(query))
+    .slice(0, 6);
+
+  if (!savedHistory.length) {
+    historyList.innerHTML = "";
+    historyList.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    return;
+  }
+
+  historyList.innerHTML = `
+    <div class="card-search-history-header">
+      <span class="card-search-history-heading">Recent searches</span>
+      <button type="button" class="card-search-history-clear">Clear history</button>
+    </div>
+    ${history.length ? history.map(term => `
+      <button
+        type="button"
+        class="card-search-history-item"
+        data-search-term="${escapeHtml(term)}"
+      >
+        <span>${escapeHtml(term)}</span>
+        <span class="card-search-history-action" aria-hidden="true">Use</span>
+      </button>
+    `).join("") : `<div class="card-search-history-empty">No matching searches.</div>`}
+  `;
+  historyList.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+}
+
+function clearCardSearchHistory() {
+  clearTimeout(cardSearchHistoryTimer);
+  try {
+    localStorage.removeItem(CARD_SEARCH_HISTORY_KEY);
+  } catch (error) {
+    console.warn("Unable to clear card search history:", error);
+    return;
+  }
+  renderCardSearchHistory();
+}
+
+function saveCardSearchHistory() {
+  clearTimeout(cardSearchHistoryTimer);
+  const input = document.getElementById("cardSearch");
+  const term = String(input?.value || "").trim().replace(/\s+/g, " ");
+  if (!term) return;
+
+  const history = getCardSearchHistory().filter(
+    savedTerm => savedTerm.toLowerCase() !== term.toLowerCase()
+  );
+  history.unshift(term);
+
+  try {
+    localStorage.setItem(
+      CARD_SEARCH_HISTORY_KEY,
+      JSON.stringify(history.slice(0, MAX_CARD_SEARCH_HISTORY))
+    );
+    if (cardSearchHistoryOpen && document.activeElement === input) {
+      renderCardSearchHistory();
+    }
+  } catch (error) {
+    console.warn("Unable to save card search history:", error);
+  }
+}
+
+function queueCardSearchHistorySave() {
+  clearTimeout(cardSearchHistoryTimer);
+  cardSearchHistoryTimer = setTimeout(saveCardSearchHistory, 650);
+}
+
+const cardSearchInput = document.getElementById("cardSearch");
+const cardSearchHistoryList = document.getElementById("cardSearchHistory");
+if (cardSearchInput) {
+  renderCardSearchHistory();
+  cardSearchInput.addEventListener("change", saveCardSearchHistory);
+  cardSearchInput.addEventListener("search", saveCardSearchHistory);
+  cardSearchInput.addEventListener("blur", () => {
+    saveCardSearchHistory();
+    setTimeout(() => {
+      cardSearchHistoryOpen = false;
+      renderCardSearchHistory();
+    }, 150);
+  });
+  cardSearchInput.addEventListener("focus", () => {
+    cardSearchHistoryOpen = true;
+    renderCardSearchHistory();
+  });
+  cardSearchInput.addEventListener("click", () => {
+    cardSearchHistoryOpen = true;
+    renderCardSearchHistory();
+  });
+  cardSearchInput.addEventListener("keydown", event => {
+    if (event.key === "Enter") saveCardSearchHistory();
+  });
+  cardSearchInput.addEventListener("input", () => {
+    cardSearchHistoryOpen = true;
+    renderCardSearchHistory();
+    queueCardSearchHistorySave();
+  });
+}
+if (cardSearchHistoryList) {
+  cardSearchHistoryList.addEventListener("click", event => {
+    if (!(event.target instanceof Element)) return;
+    if (event.target.closest(".card-search-history-clear")) {
+      clearCardSearchHistory();
+      return;
+    }
+
+    const option = event.target.closest("[data-search-term]");
+    if (!option || !cardSearchInput) return;
+
+    cardSearchInput.value = option.dataset.searchTerm || "";
+    cardSearchHistoryOpen = false;
+    queueCardRender();
+    saveCardSearchHistory();
+    cardSearchInput.focus();
+    cardSearchHistoryOpen = false;
+    renderCardSearchHistory();
+  });
+}
+document.addEventListener("click", event => {
+  if (!(event.target instanceof Element) ||
+      event.target.closest(".card-search-wrap")) return;
+  cardSearchHistoryOpen = false;
+  renderCardSearchHistory();
+});
+
 function populateCardFilter(selectId, values, allLabel) {
   const select = document.getElementById(selectId);
   if (!select) return;
@@ -3595,7 +4549,9 @@ function clearCardFilters() {
     const select = document.getElementById(id);
     if (select) select.value = "all";
   });
-  queueCardRender();
+  clearTimeout(cardRenderTimer);
+  cardVisibleCount = MAX_CARD_RESULTS;
+  renderCards();
 }
 
 async function retryCardDatabase() {
@@ -3866,7 +4822,7 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false, 
   if (!forceRefresh) {
     const bakedProducts = await loadBakedTCGPriceCatalog();
     const playersClubProducts = await loadPlayersClubProducts(false);
-    const cachedProducts = bakedProducts ? null : getCachedTCGProducts();
+    const cachedProducts = bakedProducts ? null : await getCachedTCGProducts();
     const tcgProducts = bakedProducts || cachedProducts;
     if (tcgProducts || playersClubProducts) {
       finishTCGProductLoad(
@@ -3874,17 +4830,17 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false, 
         false
       );
       if (isPlayersClubCacheStale()) void refreshPlayersClubProducts(true);
-      if (!bakedProducts && isTCGCacheStale()) void loadTCGProducts(true, true);
+      if (!bakedProducts && await isTCGCacheStale()) void loadTCGProducts(true, true);
       if (bakedProducts) void loadTCGProducts(true, true, true);
       return;
     }
   }
 
   if (!forceRefresh) {
-    const cachedProducts = getCachedTCGProducts();
+    const cachedProducts = await getCachedTCGProducts();
     if (cachedProducts) {
       finishTCGProductLoad(cachedProducts, false);
-      if (isTCGCacheStale()) void loadTCGProducts(true, true);
+      if (await isTCGCacheStale()) void loadTCGProducts(true, true);
       return;
     }
   }
@@ -3960,7 +4916,7 @@ async function loadTCGProducts(forceRefresh = false, backgroundRefresh = false, 
         url: product.handle ? `https://tcg-corner.com/products/${product.handle}` : ""
       }));
     });
-    const previousCards = getCachedTCGProducts();
+    const previousCards = await getCachedTCGProducts();
     let completeTCGCards = nextCards;
     if (!japaneseOnly && previousCards && previousCards.length >= 100 &&
         nextCards.length < previousCards.length * 0.85) {
@@ -4263,28 +5219,109 @@ async function loadBakedPlayersClubPriceCatalog(region = "AE") {
   return catalogPromise;
 }
 
-function getCachedTCGProducts() {
-  try {
-    const cached = JSON.parse(
-      localStorage.getItem(TCG_CORNER_CACHE_KEY) || "null"
-    );
-
-    return Array.isArray(cached?.cards) && cached.cards.length
-      ? cached.cards.map(card => ({
-          ...card,
-          sourceName: card.sourceName || "TCG Corner",
-          tags: card.tags || "",
-          cardText: card.cardText || "",
-          price: card.storeCurrency
-            ? convertStorePrice(card.storePrice ?? card.price, card.storeCurrency)
-            : Number(card.price || 0)
-        }))
-      : null;
-
-  } catch (error) {
-    console.warn("Unable to read the TCG Corner cache:", error);
-    return null;
+function openTCGCornerCacheDatabase() {
+  if (!window.indexedDB) {
+    return Promise.reject(new Error("IndexedDB is unavailable in this browser."));
   }
+  if (tcgCornerCacheDatabasePromise) return tcgCornerCacheDatabasePromise;
+
+  tcgCornerCacheDatabasePromise = new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(TCG_CORNER_CACHE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(TCG_CORNER_CACHE_STORE_NAME)) {
+        database.createObjectStore(TCG_CORNER_CACHE_STORE_NAME, { keyPath: "key" });
+      }
+    };
+    request.onsuccess = () => {
+      const database = request.result;
+      database.onversionchange = () => database.close();
+      resolve(database);
+    };
+    request.onerror = () => {
+      reject(request.error || new Error("Unable to open the TCG Corner cache."));
+    };
+  }).catch(error => {
+    tcgCornerCacheDatabasePromise = null;
+    throw error;
+  });
+
+  return tcgCornerCacheDatabasePromise;
+}
+
+function readTCGCornerCacheRecord(database) {
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(TCG_CORNER_CACHE_STORE_NAME, "readonly");
+    const request = transaction.objectStore(TCG_CORNER_CACHE_STORE_NAME)
+      .get(TCG_CORNER_CACHE_KEY);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => {
+      reject(request.error || new Error("Unable to read the TCG Corner cache."));
+    };
+  });
+}
+
+function writeTCGCornerCacheRecord(database, cacheData) {
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(TCG_CORNER_CACHE_STORE_NAME, "readwrite");
+    transaction.objectStore(TCG_CORNER_CACHE_STORE_NAME).put({
+      ...cacheData,
+      key: TCG_CORNER_CACHE_KEY
+    });
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => {
+      reject(transaction.error || new Error("Unable to write the TCG Corner cache."));
+    };
+    transaction.onabort = () => {
+      reject(transaction.error || new Error("The TCG Corner cache write was aborted."));
+    };
+  });
+}
+
+async function getTCGCornerCacheData() {
+  let database = null;
+  try {
+    database = await openTCGCornerCacheDatabase();
+    const cached = await readTCGCornerCacheRecord(database);
+    if (Array.isArray(cached?.cards) && cached.cards.length) return cached;
+  } catch (error) {
+    console.warn("Unable to read the TCG Corner IndexedDB cache:", error);
+  }
+
+  let legacyCache = null;
+  try {
+    legacyCache = JSON.parse(localStorage.getItem(TCG_CORNER_CACHE_KEY) || "null");
+  } catch (error) {
+    console.warn("Unable to read the legacy TCG Corner cache:", error);
+  }
+
+  if (Array.isArray(legacyCache?.cards) && legacyCache.cards.length && database) {
+    try {
+      await writeTCGCornerCacheRecord(database, legacyCache);
+      localStorage.removeItem(TCG_CORNER_CACHE_KEY);
+    } catch (error) {
+      console.warn("Unable to migrate the TCG Corner cache to IndexedDB:", error);
+    }
+  }
+
+  return Array.isArray(legacyCache?.cards) && legacyCache.cards.length
+    ? legacyCache
+    : null;
+}
+
+async function getCachedTCGProducts() {
+  const cached = await getTCGCornerCacheData();
+  return Array.isArray(cached?.cards) && cached.cards.length
+    ? cached.cards.map(card => ({
+        ...card,
+        sourceName: card.sourceName || "TCG Corner",
+        tags: card.tags || "",
+        cardText: card.cardText || "",
+        price: card.storeCurrency
+          ? convertStorePrice(card.storePrice ?? card.price, card.storeCurrency)
+          : Number(card.price || 0)
+      }))
+    : null;
 }
 
 async function loadBakedTCGPriceCatalog() {
@@ -4344,17 +5381,13 @@ async function loadBakedTCGPriceCatalog() {
   return bakedTCGPriceCatalogPromise;
 }
 
-function isTCGCacheStale() {
-  try {
-    const cached = JSON.parse(localStorage.getItem(TCG_CORNER_CACHE_KEY) || "null");
-    const savedAt = Date.parse(cached?.savedAt || "");
-    return !Number.isFinite(savedAt) || Date.now() - savedAt >= 30 * 24 * 60 * 60 * 1000;
-  } catch (error) {
-    return true;
-  }
+async function isTCGCacheStale() {
+  const cached = await getTCGCornerCacheData();
+  const savedAt = Date.parse(cached?.savedAt || "");
+  return !Number.isFinite(savedAt) || Date.now() - savedAt >= 30 * 24 * 60 * 60 * 1000;
 }
 
-function cacheTCGProducts(products) {
+async function cacheTCGProducts(products) {
   try {
     const compactProducts = products.map(product => ({
       id: product.id,
@@ -4384,23 +5417,15 @@ function cacheTCGProducts(products) {
       `TCG Corner cache size: ${(json.length / 1024 / 1024).toFixed(2)} MB`
     );
 
-    localStorage.setItem(TCG_CORNER_CACHE_KEY, json);
-
-  } catch (error) {
-    if (error.name === "QuotaExceededError") {
-      console.warn(
-        "TCG Corner cache exceeds localStorage quota. Cache was skipped."
-      );
-
-      try {
-        localStorage.removeItem(TCG_CORNER_CACHE_KEY);
-      } catch (removeError) {
-        console.warn("Unable to remove old TCG Corner cache:", removeError);
-      }
-
-    } else {
-      console.warn("Unable to save the TCG Corner cache:", error);
+    const database = await openTCGCornerCacheDatabase();
+    await writeTCGCornerCacheRecord(database, cacheData);
+    try {
+      localStorage.removeItem(TCG_CORNER_CACHE_KEY);
+    } catch (error) {
+      console.warn("Unable to remove the legacy TCG Corner cache:", error);
     }
+  } catch (error) {
+    console.warn("Unable to save the TCG Corner cache to IndexedDB:", error);
   }
 }
 
@@ -4447,7 +5472,7 @@ function finishTCGProductLoad(products, shouldCache = true) {
   });
 
   if (shouldCache) {
-    cacheTCGProducts(cards);
+    void cacheTCGProducts(cards);
   }
 
   purchaseSearchCache.clear();

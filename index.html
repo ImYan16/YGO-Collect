@@ -183,12 +183,79 @@
 
     <section id="collection" class="page" aria-labelledby="collectionTitle">
       <div class="topbar">
-        <div><h1 id="collectionTitle">Collection</h1><div class="subtitle">Cards you own. Purchases automatically add cards here.</div></div>
-        <button type="button" class="btn primary" onclick="openPurchase()">Add purchase</button>
+        <div><h1 id="collectionTitle">Collection Binder</h1><div class="subtitle">Browse your printings and manage individual copies in this binder.</div></div>
+        <div class="collection-binder-header-actions">
+          <label for="collectionBinderSelect">Binder
+            <select id="collectionBinderSelect" onchange="selectCollectionBinder(this.value)">
+              <option value="default">Binder Collection</option>
+            </select>
+          </label>
+          <button type="button" class="btn" onclick="openCreateBinder()">Create binder</button>
+          <button type="button" class="btn primary" onclick="openPurchase()">Add purchase</button>
+        </div>
       </div>
-      <div class="notice">Purchase price is tracked separately from current market value. Adding a purchase also updates your collection quantity.</div>
-      <div class="searchbar"><input id="collectionSearch" type="search" oninput="renderCollection()" placeholder="Search your collection..." aria-label="Search your collection"></div>
-      <div class="card"><div class="collection-card-grid" id="collectionTable"></div></div>
+      <div class="collection-binder-cover" id="collectionBinderCover">
+        <img id="collectionBinderCoverImage" alt="" hidden>
+        <div class="collection-binder-cover-copy">
+          <span>Current binder</span>
+          <h2 id="collectionBinderName">Binder Collection</h2>
+          <p id="collectionBinderDescription">Your Yu-Gi-Oh! collection.</p>
+        </div>
+      </div>
+      <div class="collection-binder-summary" aria-live="polite">
+        <div class="collection-binder-stat"><span>Printings</span><strong id="collectionEntryCount">0</strong></div>
+        <div class="collection-binder-stat"><span>Copies</span><strong id="collectionCopyCount">0</strong></div>
+        <div class="collection-binder-stat"><span>Market value</span><strong id="collectionMarketValue">₱0</strong></div>
+      </div>
+      <div class="collection-binder-toolbar">
+        <div class="collection-binder-toolbar-heading">
+          <div>
+            <strong>Find cards</strong>
+            <span>Search by name or narrow this binder by type, set, and rarity.</span>
+          </div>
+          <button type="button" class="btn collection-clear-filters" id="collectionClearFilters" onclick="clearCollectionFilters()" disabled>Clear filters</button>
+        </div>
+        <div class="collection-binder-toolbar-controls">
+          <label class="collection-binder-search" for="collectionSearch">
+            Search
+            <input id="collectionSearch" type="search" oninput="changeCollectionView()" placeholder="Card name, set, or rarity..." aria-label="Search cards in this binder">
+          </label>
+          <label for="collectionTypeFilter">Card type
+            <select id="collectionTypeFilter" onchange="changeCollectionView()">
+              <option value="all">All types</option>
+            </select>
+          </label>
+          <label for="collectionSetFilter">Set
+            <select id="collectionSetFilter" onchange="changeCollectionView()">
+              <option value="all">All sets</option>
+            </select>
+          </label>
+          <label for="collectionRarityFilter">Rarity
+            <select id="collectionRarityFilter" onchange="changeCollectionView()">
+              <option value="all">All rarities</option>
+            </select>
+          </label>
+          <label for="collectionSort">Sort
+            <select id="collectionSort" onchange="changeCollectionView()">
+              <option value="name">Card name (A-Z)</option>
+              <option value="copies">Most copies</option>
+              <option value="value">Most valuable</option>
+              <option value="recent">Recently added</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="collection-binder-frame">
+        <div class="collection-binder-rings" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="collection-binder-page">
+          <div class="collection-card-grid" id="collectionTable"></div>
+        </div>
+      </div>
+      <nav class="collection-pagination" aria-label="Collection binder pages">
+        <button type="button" class="btn" id="collectionPreviousPage" onclick="changeCollectionPage(-1)" disabled>Previous</button>
+        <span id="collectionPageStatus" aria-live="polite">Page 1 of 1</span>
+        <button type="button" class="btn" id="collectionNextPage" onclick="changeCollectionPage(1)" disabled>Next</button>
+      </nav>
     </section>
 
     <section id="spending" class="page" aria-labelledby="spendingTitle">
@@ -217,7 +284,10 @@
       </div>
       <div class="card-browser-panel card">
         <div class="searchbar card-browser-search">
-          <input id="cardSearch" type="search" oninput="queueCardRender()" placeholder="Search card names, effects, codes, and archetypes..." aria-label="Search cards">
+          <div class="card-search-wrap">
+            <input id="cardSearch" type="search" autocomplete="off" oninput="queueCardRender()" placeholder="Search card names, effects, codes, and archetypes..." aria-label="Search cards" aria-controls="cardSearchHistory" aria-expanded="false">
+            <div id="cardSearchHistory" class="card-search-history" role="region" aria-label="Recent searches" hidden></div>
+          </div>
           <button type="button" class="btn" onclick="clearCardFilters()">Clear filters</button>
         </div>
         <div class="card-browser-filters">
@@ -513,6 +583,38 @@
       <button class="btn" onclick="closeDeckModal()">Cancel</button>
       <button class="btn primary" onclick="saveDeck()">Create Deck</button>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="createBinderModal" role="dialog" aria-modal="true" aria-labelledby="createBinderTitle">
+  <div class="modal-box binder-modal-box">
+    <h2 id="createBinderTitle">Create a binder</h2>
+    <p class="binder-modal-intro">Give this binder a name, description, and optional cover photo. You can move cards into it from any other binder.</p>
+    <form id="createBinderForm" onsubmit="event.preventDefault(); saveBinder();">
+      <div class="form-grid">
+        <label for="binderNameInput">Binder name
+          <input id="binderNameInput" maxlength="80" required placeholder="e.g. Favorite Monsters">
+        </label>
+        <label for="binderDescriptionInput">Description
+          <textarea id="binderDescriptionInput" maxlength="240" rows="3" placeholder="What are you collecting in this binder?"></textarea>
+        </label>
+        <label for="binderBackgroundFile">Background photo
+          <input id="binderBackgroundFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onchange="updateBinderCoverPreview()">
+        </label>
+        <label for="binderBackgroundUrl">Or paste an image URL
+          <input id="binderBackgroundUrl" type="url" inputmode="url" placeholder="https://example.com/cover.jpg" oninput="updateBinderCoverPreview()">
+        </label>
+      </div>
+      <div class="binder-cover-preview" id="binderCoverPreview" aria-label="Binder cover preview">
+        <img id="binderCoverPreviewImage" alt="" hidden>
+        <span>Cover photo preview</span>
+      </div>
+      <p class="binder-image-help">Choose one image source. Uploaded JPEG, PNG, WebP, or GIF files must be under 10 MB.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn" onclick="closeCreateBinder()">Cancel</button>
+        <button type="submit" class="btn primary">Create binder</button>
+      </div>
+    </form>
   </div>
 </div>
 
