@@ -6,6 +6,8 @@ It helps you organize your Yu-Gi-Oh! card collection, track card quantities and 
 
 The project runs as a client-side web application using HTML, CSS, JavaScript, and JSON. No backend server is required.
 
+Visit the site here: https://imyan16.github.io/YGO-Collect/
+
 ## Features
 
 ### Collection Management
