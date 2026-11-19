@@ -601,6 +601,9 @@ let rulingIsLoading = false;
 
 let purchases = JSON.parse(localStorage.getItem("ygoPurchases") || "[]");
 let cardWishlist = JSON.parse(localStorage.getItem("ygoCardWishlist") || "[]");
+let marketplaceListings = JSON.parse(
+  localStorage.getItem("ygoMarketplaceListings") || "[]"
+);
 let cardDatabase = [];
 let decks = JSON.parse(localStorage.getItem("ygoDecks") || "[]");
 let deckCards = JSON.parse(localStorage.getItem("ygoDeckCards") || "{}");
@@ -630,7 +633,6 @@ let activeDeck = "";
 let collectionPage = 1;
 let collectionPageCount = 1;
 const COLLECTION_PAGE_SIZE = 9;
-let cardDetailsSelectedDeck = "";
 let cardDetailsHistoryOpen = false;
 let currentAppPage = document.querySelector(".page.active")?.id || "dashboard";
 let selectedDeckCardId = "";
@@ -686,13 +688,19 @@ if (closeCardDetailsButton) closeCardDetailsButton.onclick = closeCardDetails;
 document.getElementById("cardDetailsBackdrop")
   ?.addEventListener("click", closeCardDetails);
 document.addEventListener("keydown", event => {
-  if (event.key === "Escape" && !document.getElementById("cardDetailsPanel")?.hidden) {
+  const purchaseModalOpen =
+    document.getElementById("purchaseModal")?.classList.contains("open");
+  if (event.key === "Escape" && !purchaseModalOpen &&
+      !document.getElementById("cardDetailsPanel")?.hidden) {
     closeCardDetails();
   }
 });
 
 document.addEventListener("keydown", event => {
-  const activeDialog = [...document.querySelectorAll('[aria-modal="true"]')]
+  const activeModal = [...document.querySelectorAll('.modal.open[aria-modal="true"]')]
+    .reverse()
+    .find(dialog => dialog.getClientRects().length);
+  const activeDialog = activeModal || [...document.querySelectorAll('[aria-modal="true"]')]
     .reverse()
     .find(dialog => !dialog.hidden && dialog.getClientRects().length);
   if (!activeDialog) return;
@@ -774,6 +782,7 @@ function showPage(page, fromHistory = false) {
   });
   if(page === "dashboard") renderDashboard();
   if(page === "collection") renderCollection();
+  if(page === "wishlist") renderWishlist();
   if(page === "spending") {
     renderSpending();
     if (!cards.length && !tcgLoading) loadTCGProducts();
@@ -821,8 +830,7 @@ function populatePurchaseDestinations() {
   select.innerHTML = [
     ...binders.map(binder =>
       `<option value="binder:${escapeHtml(binder.id)}">Binder: ${escapeHtml(binder.name)}</option>`
-    ),
-    ...decks.map(deck => `<option>Deck: ${escapeHtml(deck)}</option>`)
+    )
   ].join("");
   if ([...select.options].some(option => option.value === current)) {
     select.value = current;
@@ -1121,39 +1129,6 @@ function renderBinderCover(binder) {
   }
 }
 
-function populateCardDetailsDeckOptions() {
-  const select = document.getElementById("detailCardDeckSelect");
-  if (!select) return;
-
-  populatePurchaseDestinations();
-  const purchaseDestination = document.getElementById("purchaseDestination");
-  const deckOptions = [...purchaseDestination.options].filter(option =>
-    option.value.startsWith("Deck: ")
-  );
-  const availableDecks = deckOptions.map(option =>
-    option.value.slice("Deck: ".length)
-  );
-  const selectedDeck = [
-    activeDeck,
-    cardDetailsSelectedDeck,
-    decks[0]
-  ].find(deck => availableDecks.includes(deck)) || "";
-
-  select.innerHTML = [
-    `<option value="">${decks.length ? "Select a deck" : "No decks available"}</option>`,
-    ...deckOptions.map(option =>
-      `<option value="${escapeHtml(option.value)}">${escapeHtml(option.textContent)}</option>`
-    )
-  ].join("");
-  select.disabled = deckOptions.length === 0;
-  select.value = selectedDeck ? `Deck: ${selectedDeck}` : "";
-  select.onchange = () => {
-    cardDetailsSelectedDeck = select.value.startsWith("Deck: ")
-      ? select.value.slice("Deck: ".length)
-      : "";
-  };
-}
-
 function populateCardDetailsBinderOptions() {
   const select = document.getElementById("cardDetailsBinderSelect");
   if (!select) return;
@@ -1165,6 +1140,17 @@ function populateCardDetailsBinderOptions() {
     `<option value="${escapeHtml(binder.id)}">${escapeHtml(binder.name)}</option>`
   ).join("");
   select.value = selectedBinderId;
+}
+
+function populateCardDetailsDeckOptions() {
+  const select = document.getElementById("detailCardDeckSelect");
+  if (!select) return;
+
+  select.innerHTML = decks.map(deck =>
+    `<option value="${escapeHtml(deck)}">${escapeHtml(deck)}</option>`
+  ).join("");
+  select.disabled = decks.length === 0;
+  select.value = decks.includes(activeDeck) ? activeDeck : decks[0] || "";
 }
 
 function addDeck() {
@@ -1376,10 +1362,6 @@ function renderDecks() {
         if (activeDeck === deckName) {
             activeDeck = "";
         }
-        if (cardDetailsSelectedDeck === deckName) {
-            cardDetailsSelectedDeck = "";
-        }
-
         saveData();
         populatePurchaseDestinations();
 
@@ -1487,10 +1469,6 @@ function renameDeck(oldName) {
         if (activeDeck === oldName) {
             activeDeck = trimmedName;
         }
-        if (cardDetailsSelectedDeck === oldName) {
-            cardDetailsSelectedDeck = trimmedName;
-        }
-
         saveData();
         populatePurchaseDestinations();
         closeModal();
@@ -2376,8 +2354,13 @@ async function showCardDetails(card) {
   }
   if (renderToken !== cardDetailsRenderToken) return;
 
-  populateCardDetailsDeckOptions();
   populateCardDetailsBinderOptions();
+  populateCardDetailsDeckOptions();
+  const deckSection = document.getElementById("cardDetailsDeckSection");
+  if (deckSection) {
+    deckSection.hidden =
+      currentAppPage !== "decks" || !decks.includes(activeDeck);
+  }
   document.getElementById("cardDetailsBinderAddNote").textContent = "";
   const printings = getCardPrintings(card);
   const detailsDisclosure = document.querySelector(".card-details-slot");
@@ -2516,6 +2499,70 @@ async function showCardDetails(card) {
   document.getElementById("cardDetailsBackdrop").hidden = false;
   document.getElementById("closeCardDetails")?.focus({ preventScroll: true });
 }
+
+document
+  .getElementById("addDetailCardToDeck")
+  ?.addEventListener("click", event => {
+    event.preventDefault();
+
+    const panel = document.getElementById("cardDetailsPanel");
+    const card = localCardDatabase.find(
+      item => String(item.id) === String(panel?.dataset.cardId)
+    );
+    if (!card) {
+      showAppAlert("Card details are not ready yet. Please try again.");
+      return;
+    }
+
+    const deckName = document.getElementById("detailCardDeckSelect")?.value || "";
+    if (currentAppPage !== "decks" || !decks.includes(deckName)) {
+      showAppAlert("Select a deck in the Deck Builder before adding this card.");
+      return;
+    }
+
+    const setSelect = document.getElementById("detailCardSetSelect");
+    const raritySelect = document.getElementById("detailCardRaritySelect");
+    const quantityInput = document.getElementById("detailCardQuantity");
+    const selectedOption = setSelect?.selectedOptions?.[0];
+    if (!selectedOption || !raritySelect?.value) {
+      showAppAlert("Select a valid set and rarity.");
+      return;
+    }
+
+    const quantity = Math.min(
+      3,
+      Math.max(1, Math.floor(Number(quantityInput?.value) || 1))
+    );
+    const region = selectedOption.dataset.region || "TCG";
+    const selectedSet = selectedOption.dataset.set || "";
+    const selectedRarity = raritySelect.value;
+    const printing = getCardPrintings(card).find(item =>
+      item.set === selectedSet &&
+      item.region === region &&
+      item.rarity === selectedRarity
+    );
+    if (!printing) {
+      showAppAlert("No matching card printing was found.");
+      return;
+    }
+
+    const added = addCardEntryToDeck(
+      deckName,
+      card,
+      quantity,
+      selectedRarity,
+      getTcgCornerRarity(selectedRarity),
+      selectedSet,
+      region
+    );
+    if (!added) return;
+
+    activeDeck = deckName;
+    quantityInput.value = "1";
+    saveData();
+    closeCardDetails();
+    renderDecks();
+  });
 
 async function showCardDetailsForImage(cardId, cardName) {
   try {
@@ -3499,7 +3546,14 @@ function renderPurchaseCardPreview(card) {
 }
 document.getElementById("purchaseCard").addEventListener("change", updatePurchaseFields);
 document.getElementById("purchaseRarity").addEventListener("change", updatePurchaseRarity);
-function closePurchase() { document.getElementById("purchaseModal").classList.remove("open"); }
+function closePurchase() {
+  document.getElementById("purchaseModal").classList.remove("open");
+  document.body.classList.remove("purchase-from-card-details");
+  if (!document.getElementById("cardDetailsPanel")?.hidden) {
+    document.getElementById("addCardDetailsPurchase")
+      ?.focus({ preventScroll: true });
+  }
+}
 
 function getPurchasePrintingLabel(purchase) {
   const card = cards.find(item => String(item.id) === String(purchase?.cardId));
@@ -3646,7 +3700,7 @@ function toggleCardWishlist() {
     String(entry?.id ?? "") === String(card.id) ||
     normalizeRulingCardName(entry?.name) === cardName
   );
-  cardWishlist = isSaved
+  const updatedWishlist = isSaved
     ? cardWishlist.filter(entry =>
         String(entry?.id ?? "") !== String(card.id) &&
         normalizeRulingCardName(entry?.name) !== cardName
@@ -3658,15 +3712,98 @@ function toggleCardWishlist() {
       }];
 
   try {
-    localStorage.setItem("ygoCardWishlist", JSON.stringify(cardWishlist));
+    localStorage.setItem("ygoCardWishlist", JSON.stringify(updatedWishlist));
   } catch (error) {
     console.error("Unable to save the card wishlist:", error);
     showAppAlert("Your wishlist could not be saved. Check available browser storage and try again.");
     return;
   }
 
+  cardWishlist = updatedWishlist;
   renderCardWishlist(card);
+  renderWishlist();
 }
+
+function renderWishlist() {
+  const table = document.getElementById("wishlistTable");
+  const count = document.getElementById("wishlistCardCount");
+  const downloadButton = document.getElementById("downloadWishlistImage");
+  if (!table || !count || !downloadButton) return;
+
+  const wishlist = cardWishlist.map(entry => {
+    const card = localCardDatabase.find(item =>
+      String(item.id) === String(entry?.id ?? "")
+    ) || localCardDatabase.find(item =>
+      normalizeRulingCardName(item.name) ===
+        normalizeRulingCardName(entry?.name)
+    ) || {
+      id: entry?.id || "",
+      name: entry?.name || "Unknown card"
+    };
+    return { entry, card };
+  }).filter(({ entry }) => entry?.name);
+
+  count.textContent = wishlist.length.toLocaleString();
+  downloadButton.disabled = wishlist.length === 0;
+  table.innerHTML = wishlist.length
+    ? wishlist.map(({ entry, card }) => `
+        <article class="collection-card-tile wishlist-card"
+                 data-card-id="${escapeHtml(String(card.id || entry.id || ""))}"
+                 data-card-name="${escapeHtml(card.name)}">
+          ${getCardImageMarkup(
+            card,
+            entry.image,
+            card.name,
+            "wishlist-card-image"
+          )}
+          <div class="collection-card-details">
+            <strong>${escapeHtml(card.name)}</strong>
+            <button type="button" class="btn wishlist-card-remove"
+                    data-wishlist-card-id="${escapeHtml(String(entry.id || card.id || ""))}"
+                    data-wishlist-card-name="${escapeHtml(entry.name)}"
+                    aria-label="Remove ${escapeHtml(card.name)} from wishlist">
+              Remove
+            </button>
+          </div>
+        </article>
+      `).join("")
+    : `<div class="collection-empty-pocket collection-empty-message">
+         <strong>Your wishlist is empty.</strong>
+         <span>Open a card and choose Add to wishlist to save it here.</span>
+         <button type="button" class="btn" onclick="showPage('cards')">Browse cards</button>
+       </div>`;
+  bindCardImageFallbacks(table);
+}
+
+document.getElementById("wishlistTable")
+  ?.addEventListener("click", event => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest("[data-wishlist-card-id]");
+    if (!button) return;
+
+    const cardId = button.dataset.wishlistCardId;
+    const cardName = normalizeRulingCardName(button.dataset.wishlistCardName);
+    const updatedWishlist = cardWishlist.filter(entry =>
+      String(entry?.id ?? "") !== cardId &&
+      normalizeRulingCardName(entry?.name) !== cardName
+    );
+    try {
+      localStorage.setItem("ygoCardWishlist", JSON.stringify(updatedWishlist));
+    } catch (error) {
+      console.error("Unable to save the card wishlist:", error);
+      showAppAlert("Your wishlist could not be saved. Check available browser storage and try again.");
+      return;
+    }
+
+    cardWishlist = updatedWishlist;
+    renderWishlist();
+    const detailCard = localCardDatabase.find(item =>
+      String(item.id) === cardId
+    );
+    if (detailCard && !document.getElementById("cardDetailsPanel")?.hidden) {
+      renderCardWishlist(detailCard);
+    }
+  });
 
 function addCardDetailsPurchase() {
   const cardId = document.getElementById("cardDetailsPanel")?.dataset.cardId || "";
@@ -3685,8 +3822,13 @@ function addCardDetailsPurchase() {
     return;
   }
 
-  closeCardDetails();
+  const keepCardDetailsOpen = currentAppPage === "decks";
+  if (!keepCardDetailsOpen) closeCardDetails();
   openPurchaseFor(purchaseCard.id);
+  if (keepCardDetailsOpen &&
+      document.getElementById("purchaseModal").classList.contains("open")) {
+    document.body.classList.add("purchase-from-card-details");
+  }
 }
 
 function addCardDetailsToBinder() {
@@ -3786,42 +3928,17 @@ function savePurchase() {
   const qty = Number(document.getElementById("purchaseQty").value);
   const price = Number(document.getElementById("purchasePrice").value);
   const destinationChoice = document.getElementById("purchaseDestination").value;
-  let binderId = activeBinderId;
-  let destination = destinationChoice;
-  let deckQuantityAdded = 0;
   if (!card || !Number.isInteger(qty) || qty < 1 || !Number.isFinite(price) || price < 0) {
     showAppAlert("Enter a valid card, whole-number quantity, and non-negative price.");
     return;
   }
-  if (destinationChoice.startsWith("binder:")) {
-    const selectedBinderId = destinationChoice.slice("binder:".length);
-    if (binders.some(binder => binder.id === selectedBinderId)) {
-      binderId = selectedBinderId;
-    }
-    destination = getBinderDestination(binderId);
-  }
-  if (destination.startsWith("Deck: ")) {
-    const deckName = destination.slice("Deck: ".length);
-    if (!decks.includes(deckName)) {
-      destination = getBinderDestination(binderId);
-    } else {
-      const result = addPurchasedCardToDeck(
-        deckName,
-        card,
-        qty,
-        card.rarity,
-        price
-      );
-      if (result === "added") {
-        deckQuantityAdded = qty;
-      } else if (result !== "updated") {
-        destination = getBinderDestination(binderId);
-        if (result === "invalid") {
-          showAppAlert(`The purchase was recorded in ${destination} because its card printing could not be added to the deck.`);
-        }
-      }
-    }
-  }
+  const selectedBinderId = destinationChoice.startsWith("binder:")
+    ? destinationChoice.slice("binder:".length)
+    : "";
+  const binderId = binders.some(binder => binder.id === selectedBinderId)
+    ? selectedBinderId
+    : activeBinderId;
+  const destination = getBinderDestination(binderId);
   purchases.unshift({
     id: Date.now(),
     cardId: card.id,
@@ -3839,7 +3956,7 @@ function savePurchase() {
     binderId,
     copyBinderIds: Array(qty).fill(binderId),
     copyDestinations: Array(qty).fill(destination),
-    deckQuantityAdded,
+    deckQuantityAdded: 0,
     qty,
     price,
     total: qty * price,
@@ -3849,7 +3966,20 @@ function savePurchase() {
   saveData();
   closePurchase();
   renderDashboard();
-  showPage("collection");
+  renderCollection();
+  renderSpending();
+  if (currentAppPage === "decks") {
+    renderDecks();
+    const detailsPanel = document.getElementById("cardDetailsPanel");
+    if (detailsPanel && !detailsPanel.hidden) {
+      const detailCard = localCardDatabase.find(
+        item => String(item.id) === detailsPanel.dataset.cardId
+      );
+      if (detailCard) renderCardDetailsInventory(detailCard);
+    }
+  } else {
+    showPage("collection");
+  }
 }
 
 function collectionRows() {
@@ -6059,12 +6189,6 @@ document.addEventListener("click", event => {
 
 
 
-let marketplaceListings = JSON.parse(
-  localStorage.getItem("ygoMarketplaceListings") || "[]"
-);
-
-
-
 function addMarketplaceListing(card, quantity, price, set, rarity) {
   if (!card?.id) return;
 
@@ -6203,23 +6327,41 @@ function drawMarketplaceShareText(context, text, x, y, maxWidth, lineHeight, max
   });
 }
 
-function loadMarketplaceShareImage(source) {
+function getShareImageProxyUrl(source) {
+  try {
+    const url = new URL(source, window.location.href);
+    if (url.hostname.toLowerCase() !== "images.ygoprodeck.com") return "";
+    return `https://images.weserv.nl/?url=${encodeURIComponent(
+      `${url.host}${url.pathname}${url.search}`
+    )}`;
+  } catch {
+    return "";
+  }
+}
+
+function loadShareImage(source) {
   return new Promise(resolve => {
     if (!source) {
       resolve(null);
       return;
     }
 
-    const timeout = setTimeout(() => finish(null), 5000);
+    const proxyUrl = getShareImageProxyUrl(source);
+    let finished = false;
+    const timeout = setTimeout(() => finish(null), 12000);
     const finish = result => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timeout);
+      image.onload = null;
+      image.onerror = null;
       resolve(result);
     };
     const image = new Image();
     image.crossOrigin = "anonymous";
     image.onload = () => finish(image);
     image.onerror = () => finish(null);
-    image.src = source;
+    image.src = proxyUrl || source;
   });
 }
 
@@ -6231,7 +6373,7 @@ async function downloadMarketplaceListingsImage() {
   }
 
   const images = await Promise.all(listings.map(({ listing, card }) =>
-    loadMarketplaceShareImage(getMarketplaceImage(card, listing.image))
+    loadShareImage(getMarketplaceImage(card, listing.image))
   ));
   const headerHeight = 248;
   const rowHeight = 112;
@@ -6364,6 +6506,134 @@ async function downloadMarketplaceListingsImage() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+async function downloadWishlistImage() {
+  const wishlist = cardWishlist.map(entry => {
+    const card = localCardDatabase.find(item =>
+      String(item.id) === String(entry?.id ?? "")
+    ) || localCardDatabase.find(item =>
+      normalizeRulingCardName(item.name) ===
+        normalizeRulingCardName(entry?.name)
+    ) || {
+      id: entry?.id || "",
+      name: entry?.name || "Unknown card"
+    };
+    return { entry, card };
+  }).filter(({ entry }) => entry?.name);
+
+  if (!wishlist.length) {
+    showAppAlert("Add a card to your wishlist before downloading its image.");
+    return;
+  }
+
+  const images = await Promise.all(wishlist.map(({ entry, card }) =>
+    loadShareImage(getMarketplaceImage(card, entry.image))
+  ));
+  const headerHeight = 208;
+  const rowHeight = 112;
+  const footerHeight = 48;
+  const canvas = document.createElement("canvas");
+  canvas.width = 1200;
+  canvas.height = headerHeight + wishlist.length * rowHeight + footerHeight;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    showAppAlert("Your browser could not create the wishlist image.");
+    return;
+  }
+
+  const background = context.createLinearGradient(0, 0, canvas.width, canvas.height);
+  background.addColorStop(0, "#101722");
+  background.addColorStop(1, "#1c2a3a");
+  context.fillStyle = background;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#182331";
+  context.fillRect(40, 40, 1120, canvas.height - 80);
+  context.strokeStyle = "#344357";
+  context.lineWidth = 2;
+  context.strokeRect(40, 40, 1120, canvas.height - 80);
+
+  context.fillStyle = "#9fb4cb";
+  context.font = "700 22px Segoe UI, sans-serif";
+  context.fillText("YGO COLLECT  /  WISHLIST", 76, 94);
+  context.fillStyle = "#f4f7fb";
+  context.font = "700 42px Segoe UI, sans-serif";
+  context.fillText("Cards to collect", 76, 154);
+  context.fillStyle = "#aab7c6";
+  context.font = "18px Segoe UI, sans-serif";
+  context.fillText(
+    `${wishlist.length} ${wishlist.length === 1 ? "card" : "cards"} wanted`,
+    76,
+    184
+  );
+  context.fillStyle = "#72849a";
+  context.font = "700 14px Segoe UI, sans-serif";
+  context.fillText("CARD", 170, headerHeight - 22);
+
+  wishlist.forEach(({ card }, index) => {
+    const top = headerHeight + index * rowHeight;
+    const image = images[index];
+    context.fillStyle = index % 2 === 0 ? "#202d3b" : "#182331";
+    context.fillRect(60, top, 1080, rowHeight);
+    context.strokeStyle = "#344357";
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(60, top + rowHeight);
+    context.lineTo(1140, top + rowHeight);
+    context.stroke();
+
+    const art = { x: 86, y: top + 6, width: 68, height: 100 };
+    context.fillStyle = "#111a25";
+    context.fillRect(art.x, art.y, art.width, art.height);
+    context.strokeStyle = "#56657a";
+    context.lineWidth = 1;
+    context.strokeRect(art.x, art.y, art.width, art.height);
+    if (image) {
+      const scale = Math.min(art.width / image.naturalWidth, art.height / image.naturalHeight);
+      const width = image.naturalWidth * scale;
+      const height = image.naturalHeight * scale;
+      context.drawImage(
+        image,
+        art.x + (art.width - width) / 2,
+        art.y + (art.height - height) / 2,
+        width,
+        height
+      );
+    } else {
+      context.fillStyle = "#aab7c6";
+      context.font = "10px Segoe UI, sans-serif";
+      context.fillText("No image", art.x + 8, art.y + 52, art.width - 16);
+    }
+
+    context.fillStyle = "#7de0b0";
+    context.font = "700 17px Segoe UI, sans-serif";
+    context.fillText(String(index + 1).padStart(2, "0"), 64, top + 58);
+    context.fillStyle = "#f4f7fb";
+    context.font = "700 22px Segoe UI, sans-serif";
+    drawMarketplaceShareText(context, card.name, 170, top + 58, 900, 27, 1);
+  });
+
+  let blob;
+  try {
+    blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+  } catch (error) {
+    console.error("Unable to export wishlist image:", error);
+    showAppAlert("Could not export the wishlist image. Please try again.");
+    return;
+  }
+  if (!blob) {
+    showAppAlert("Your browser could not export the wishlist image.");
+    return;
+  }
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "ygo-wishlist.png";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function renderMarketplaceListings() {
   const container = document.getElementById("marketplaceListings");
   if (!container) return;
@@ -6468,6 +6738,10 @@ document
 document
   .getElementById("downloadMarketplaceListingsImage")
   ?.addEventListener("click", () => void downloadMarketplaceListingsImage());
+
+document
+  .getElementById("downloadWishlistImage")
+  ?.addEventListener("click", () => void downloadWishlistImage());
 
 function openMarketplaceListingEdit(listingId) {
   const listing = marketplaceListings.find(
@@ -6683,76 +6957,6 @@ function refreshDeckPrices() {
   }
 }
 
-document
-  .getElementById("addDetailCardToDeck")
-  ?.addEventListener("click", event => {
-    event.preventDefault();
-
-    const panel = document.getElementById("cardDetailsPanel");
-    const card = localCardDatabase.find(
-      item => String(item.id) === String(panel?.dataset.cardId)
-    );
-    if (!card) {
-      showAppAlert("Card details are not ready yet. Please try again.");
-      return;
-    }
-
-    const destination = document.getElementById("detailCardDeckSelect")?.value || "";
-    const deckName = destination.startsWith("Deck: ")
-      ? destination.slice("Deck: ".length)
-      : "";
-    if (!decks.includes(deckName)) {
-      showAppAlert(decks.length ? "Select the deck you want to add this card to." : "Create a deck before adding cards.");
-      return;
-    }
-
-    const setSelect = document.getElementById("detailCardSetSelect");
-    const raritySelect = document.getElementById("detailCardRaritySelect");
-    const quantityInput = document.getElementById("detailCardQuantity");
-    const selectedOption = setSelect?.selectedOptions?.[0];
-    if (!selectedOption || !raritySelect?.value) {
-      showAppAlert("Select a valid set and rarity.");
-      return;
-    }
-
-    const quantity = Math.min(
-      3,
-      Math.max(1, Math.floor(Number(quantityInput?.value) || 1))
-    );
-    const region = selectedOption?.dataset.region || "TCG";
-    const selectedSet = selectedOption?.dataset.set || "";
-    const selectedRarity = raritySelect.value;
-
-    const printing = getCardPrintings(card).find(item =>
-      item.set === selectedSet &&
-      item.region === region &&
-      item.rarity === selectedRarity
-    );
-
-    if (!printing) {
-      showAppAlert("No matching card printing was found.");
-      return;
-    }
-
-    const added = addCardEntryToDeck(
-      deckName,
-      card,
-      quantity,
-      selectedRarity,
-      getTcgCornerRarity(selectedRarity),
-      selectedSet,
-      region
-    );
-
-    if (added !== true) return;
-
-    activeDeck = deckName;
-    cardDetailsSelectedDeck = deckName;
-    saveData();
-    closeCardDetails();
-    renderDecks();
-  });
-
 function getTcgCornerRarity(rarity) {
   const key = String(rarity || "").trim();
   return TCGC_RAR[key] || key;
@@ -6886,6 +7090,7 @@ loadLocalCardDatabase()
     populateCardFilters();
     renderDashboard();
     renderCollection();
+    renderWishlist();
     renderSpending();
     renderDecks();
     renderCards();

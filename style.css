@@ -3516,6 +3516,10 @@ table tbody tr:hover {
   backdrop-filter: blur(3px);
 }
 
+body.purchase-from-card-details #purchaseModal {
+  z-index: 10001;
+}
+
 .modal-box,
 .app-alert-dialog,
 .app-confirm-dialog,
@@ -5695,6 +5699,16 @@ table tbody tr:hover {
   border-radius: var(--radius-lg);
   background: linear-gradient(130deg, #292340, #131923 70%);
   box-shadow: inset 0 1px rgba(255, 255, 255, .08);
+}
+
+.wishlist-binder-cover {
+  background: linear-gradient(130deg, #432431, #171923 70%);
+}
+
+.wishlist-card-remove {
+  justify-self: start;
+  padding: 4px 9px;
+  font-size: 11px;
 }
 
 .collection-binder-cover::after {

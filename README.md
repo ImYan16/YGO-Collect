@@ -39,11 +39,13 @@ The Rulings page presents the selected card's details and artwork alongside its 
 
 Spending, collection, and marketplace card thumbnails reuse images from the local card catalog when a product image is missing or fails to load.
 
+The Wishlist Binder keeps saved cards in one place and can download a shareable PNG of the wishlist.
+
 The project uses JSON data so the application does not need to request card information from an external API every time you use it.
 
 ### Deck Builder
 
-Create and manage Yu-Gi-Oh! decks from your card collection.
+Create and manage Yu-Gi-Oh! decks independently in the Deck Builder.
 
 The deck system supports:
 
@@ -57,9 +59,9 @@ The deck system supports:
 * Multiple decks
 * Drag-and-drop ordering of deck copies
 
-The application checks card limits against the selected banlist when cards are added to a deck, including purchases assigned to a deck. If a purchased card already exists in the deck, the purchase updates its recorded purchase price without adding extra copies. Purchases that cannot be added under the selected banlist remain recorded in the binder.
+The application checks card limits against the selected banlist when cards are added from the Deck Builder. Card browsing, spending, and collection management do not add cards to decks.
 
-Marketplace listings are shown as a compact list with card thumbnails. You can edit each listing's quantity and per-card price, copy the complete list as formatted text, or download one share-ready PNG containing every listing and its thumbnail.
+Marketplace listings are shown as a compact list with card thumbnails. You can edit each listing's quantity and per-card price, copy the complete list as formatted text, or download one share-ready PNG containing every listing and its thumbnail. PNG exports load YGOPRODeck artwork through images.weserv.nl, a CORS-enabled image transform, so the browser can draw it into the image.
 
 ### Spending and Purchase Tracking
 

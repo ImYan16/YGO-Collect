@@ -42,6 +42,13 @@
         <span>Collection</span>
       </button>
 
+      <button data-page="wishlist" data-mobile-label="Wishlist" aria-label="Wishlist" aria-controls="wishlist" title="Wishlist">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z"></path>
+        </svg>
+        <span>Wishlist</span>
+      </button>
+
       <button data-page="spending" data-mobile-label="Spend" aria-label="Spending" aria-controls="spending" title="Spending">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="3" y="5" width="18" height="14" rx="2"></rect>
@@ -256,6 +263,32 @@
         <span id="collectionPageStatus" aria-live="polite">Page 1 of 1</span>
         <button type="button" class="btn" id="collectionNextPage" onclick="changeCollectionPage(1)" disabled>Next</button>
       </nav>
+    </section>
+
+    <section id="wishlist" class="page" aria-labelledby="wishlistTitle">
+      <div class="topbar">
+        <div><h1 id="wishlistTitle">Wishlist Binder</h1><div class="subtitle">Keep track of cards you want to add to your collection.</div></div>
+        <div class="collection-binder-header-actions">
+          <button type="button" class="btn" id="downloadWishlistImage" disabled>Download wishlist image</button>
+          <button type="button" class="btn primary" onclick="showPage('cards')">Browse cards</button>
+        </div>
+      </div>
+      <div class="collection-binder-cover wishlist-binder-cover">
+        <div class="collection-binder-cover-copy">
+          <span>Wishlist</span>
+          <h2>Cards to collect</h2>
+          <p>Save cards from the card details panel and they will appear here.</p>
+        </div>
+      </div>
+      <div class="collection-binder-summary" aria-live="polite">
+        <div class="collection-binder-stat"><span>Cards wanted</span><strong id="wishlistCardCount">0</strong></div>
+      </div>
+      <div class="collection-binder-frame wishlist-binder-frame">
+        <div class="collection-binder-rings" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div class="collection-binder-page">
+          <div class="collection-card-grid" id="wishlistTable"></div>
+        </div>
+      </div>
     </section>
 
     <section id="spending" class="page" aria-labelledby="spendingTitle">
@@ -640,36 +673,16 @@
               <p id="detailCardType" class="card-details-type"></p>
             </header>
 
-            <section class="card-details-section card-details-deck-section" aria-labelledby="addCardToDeckTitle">
+            <section class="card-details-section card-details-deck-section" id="cardDetailsDeckSection" aria-labelledby="addCardToDeckTitle" hidden>
               <h3 id="addCardToDeckTitle">Add to deck</h3>
               <div class="add-to-deck-controls">
-                <label for="detailCardDeckSelect">Put in
+                <label for="detailCardDeckSelect">Deck
                   <select id="detailCardDeckSelect"></select>
                 </label>
-
-                <label for="detailCardSetSelect">Set
-                  <select id="detailCardSetSelect"></select>
-                </label>
-
-                <label for="detailCardRaritySelect">Rarity
-                  <select id="detailCardRaritySelect">
-                      <option value="">Select rarity</option>
-                  </select>
-                </label>
-
                 <label for="detailCardQuantity">Quantity
-                  <input
-                    type="number"
-                    id="detailCardQuantity"
-                    min="1"
-                    max="3"
-                    value="1">
+                  <input type="number" id="detailCardQuantity" min="1" max="3" value="1">
                 </label>
-
-                <button
-                  type="button"
-                  id="addDetailCardToDeck"
-                  class="add-detail-card-btn">
+                <button type="button" id="addDetailCardToDeck" class="add-detail-card-btn">
                   Add to deck
                 </button>
               </div>
@@ -710,6 +723,14 @@
               <h3 id="cardDetailsBinderTitle">Add to binder</h3>
               <p class="card-details-note">Add one copy without purchase details.</p>
               <div class="add-to-binder-controls">
+                <label for="detailCardSetSelect">Set
+                  <select id="detailCardSetSelect"></select>
+                </label>
+                <label for="detailCardRaritySelect">Rarity
+                  <select id="detailCardRaritySelect">
+                    <option value="">Select rarity</option>
+                  </select>
+                </label>
                 <label for="cardDetailsBinderSelect">Binder
                   <select id="cardDetailsBinderSelect"></select>
                 </label>
