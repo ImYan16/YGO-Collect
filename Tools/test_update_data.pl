@@ -116,7 +116,8 @@ HTML
     ['Super Rare', 'Secret Rare'],
     'reads rarity values from the rarity header instead of the Japanese-name column',
   );
-  is($rows->[2]{rarity}[0], 'Over Rush Rare', 'accepts slash-separated card codes');
+  is($rows->[4]{card_code}, 'RD/P013-JP001', 'accepts slash-separated card codes');
+  is($rows->[4]{rarity}[0], 'Over Rush Rare', 'reads rarity for slash-separated card codes');
   is(UpdateCardData::list_region(
     'https://yugipedia.com/wiki/Set_Card_Lists:Beyond_the_Brave_(OCG-JP)'
   ), 'OCG', 'classifies Japanese OCG lists');
