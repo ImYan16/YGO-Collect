@@ -35,7 +35,11 @@ my $JSON_ENCODER = JSON::PP->new->utf8;
 
 sub fetch_bytes {
   my ($url) = @_;
-  for my $attempt (0 .. 2) {
+  my @retry_delays = $url =~ m{^https?://(?:www\.)?yugipedia\.com/}i
+    ? (10, 30, 60)
+    : (1, 2);
+  my $attempt = 0;
+  while (1) {
     my $pid = open my $pipe, '-|';
     die "Unable to start curl: $!\n" unless defined $pid;
     if (!$pid) {
@@ -52,10 +56,10 @@ sub fetch_bytes {
     return $body if $closed;
     my $status = $?;
     die "curl failed for $url (exit " . ($status >> 8) . ")\n"
-      if $attempt == 2;
-    sleep(2 ** $attempt);
+      if $attempt >= @retry_delays;
+    sleep($retry_delays[$attempt]);
+    $attempt++;
   }
-  die "Unable to fetch $url\n";
 }
 
 sub fetch_text {

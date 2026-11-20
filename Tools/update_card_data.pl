@@ -93,9 +93,11 @@ sub set_list_urls {
       if (index($href, 'Set_Card_Lists:') >= 0 &&
           ($href =~ /\(TCG-EN\)/ || $href =~ /\(OCG-AE\)/ || $href =~ /\(OCG-JP\)/)) {
         my $absolute = urljoin($product_url, $anchor->{href});
-        my @parts = urlsplit($absolute);
-        my $host = $parts[1];
-        $urls{$absolute} = 1 if lc($host) eq 'yugipedia.com';
+        my ($scheme, $host, $path, $query) = urlsplit($absolute);
+        next unless $host eq 'yugipedia.com' && $path =~ m{^/wiki/};
+        $absolute = "$scheme://$host$path"
+          if $query =~ /(?:^\?|&)action=edit(?:&|$)/i;
+        $urls{$absolute} = 1;
       }
       $anchor = undef;
     }
@@ -346,7 +348,7 @@ sub fetch_released_sets {
 
   my %list_urls;
   for my $index (0 .. $#$product_urls) {
-    sleep(0.25) if $index;
+    sleep(1);
     my $product_html = fetch_text($product_urls->[$index]);
     $list_urls{$_} = 1 for @{set_list_urls($product_html, $product_urls->[$index])};
   }
@@ -355,7 +357,7 @@ sub fetch_released_sets {
 
   my $released = { TCG => [], AE => [], OCG => [] };
   for my $index (0 .. $#list_urls) {
-    sleep(0.25) if $index;
+    sleep(1);
     my $url = $list_urls[$index];
     my $page = fetch_text($url);
     my $release_date = eval { parse_release_date($page) };

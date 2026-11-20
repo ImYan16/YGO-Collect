@@ -29,6 +29,21 @@ HTML
   );
 };
 
+subtest 'set card list links avoid edit actions' => sub {
+  my $source = <<'HTML';
+<a href="/wiki/Set_Card_Lists:Example_(OCG-JP)?action=edit">Edit list</a>
+<a href="/wiki/Set_Card_Lists:Example_(OCG-JP)">Published list</a>
+HTML
+  is_deeply(
+    UpdateCardData::set_list_urls(
+      $source,
+      'https://yugipedia.com/wiki/Example_Pack',
+    ),
+    ['https://yugipedia.com/wiki/Set_Card_Lists:Example_(OCG-JP)'],
+    'normalizes edit links to the public card-list page',
+  );
+};
+
 subtest 'card rows and release dates parse' => sub {
   my $source = <<'HTML';
 <div>(Release date: 16 May 2026)</div>
