@@ -139,6 +139,10 @@ HTML
   is(UpdateCardData::list_set_name(
     'https://yugipedia.com/wiki/Set_Card_Lists:Beyond_the_Brave_(OCG-JP)'
   ), 'Beyond the Brave', 'extracts the Japanese OCG set name');
+  is(UpdateCardData::list_set_name(
+    'https://yugipedia.com/wiki/Set_Card_Lists:Revolution_Booster:_Toon_/_Witchcrafter_/_Unchained_(OCG-JP)'
+  ), 'Revolution Booster: Toon / Witchcrafter / Unchained',
+    'preserves slashes in Japanese set names');
   is_deeply(
     UpdateCardData::deduplicate_printing_rows($rows)->[0]{rarity},
     ['Super Rare', 'Secret Rare', 'Prismatic Secret Rare'],

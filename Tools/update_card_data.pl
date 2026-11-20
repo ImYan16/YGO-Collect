@@ -120,7 +120,7 @@ sub list_set_name {
   my ($url) = @_;
   my @parts = urlsplit($url);
   my $path = $parts[2];
-  my ($title) = $path =~ m{/([^/]+)$};
+  my ($title) = $path =~ m{^/wiki/(.+)$};
   $title = unquote($title || '');
   $title =~ tr/_/ /;
   my ($name) = $title =~ /^Set Card Lists:\s*(.*?)\s+\((?:TCG-EN|OCG-AE|OCG-JP)\)$/i;
