@@ -17,7 +17,7 @@ my $CARD_API_URL = 'https://db.ygoprodeck.com/api/v7/cardinfo.php?misc=yes';
 my %SOURCE_URLS = (
   TCG => 'https://www.db.yugioh-card.com/yugiohdb/forbidden_limited.action?request_locale=en',
   AE => 'https://www.db.yugioh-card.com/yugiohdb/forbidden_limited.action?request_locale=ae',
-  OCG => 'https://cardcluster.com/limited-list/ocg',
+  OCG => 'https://www.db.yugioh-card.com/yugiohdb/forbidden_limited.action?request_locale=ja',
 );
 my %SECTION_KEYS = (
   list_forbidden => 'Forbidden',
