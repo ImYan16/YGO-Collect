@@ -2477,6 +2477,82 @@ aside nav button img {
   font-size: 12px;
 }
 
+.purchase-store-listings {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.purchase-store-listing {
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.purchase-store-listing legend {
+  padding: 0 5px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.purchase-store-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.purchase-store-choice input[type="radio"] {
+  width: auto;
+  margin: 0;
+}
+
+.purchase-store-listing > label:not(.purchase-store-choice) {
+  margin-top: 10px;
+}
+
+.purchase-store-price {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.purchase-store-price > div {
+  display: grid;
+  gap: 2px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.purchase-store-price small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.purchase-store-link {
+  width: fit-content;
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.purchase-store-link:hover {
+  text-decoration: underline;
+}
+
+.purchase-store-listings-empty {
+  grid-column: 1 / -1;
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .card-image-unavailable {
   display: flex;
   align-items: center;
@@ -3540,6 +3616,15 @@ body.purchase-from-card-details #purchaseModal {
 
 .purchase-modal-box {
   width: min(760px, 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.purchase-modal-box .purchase-form-layout {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
 }
 
 .purchase-card-suggestions {
@@ -3603,6 +3688,13 @@ body.purchase-from-card-details #purchaseModal {
 .modal-actions,
 .app-confirm-actions {
   flex-wrap: wrap;
+}
+
+.purchase-modal-box .modal-actions {
+  flex: 0 0 auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
 }
 
 .card-details-panel {
@@ -4068,6 +4160,10 @@ body.purchase-from-card-details #purchaseModal {
 
   .purchase-form-layout .form-grid > label:first-child {
     grid-column: auto;
+  }
+
+  .purchase-store-listings {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .purchase-card-preview {

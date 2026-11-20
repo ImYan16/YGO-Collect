@@ -572,11 +572,10 @@
         <div id="purchaseCardSuggestions" class="purchase-card-suggestions" role="listbox" aria-label="Matching cards" hidden></div>
         <select id="purchaseCard" style="display:none;"></select>
       </label>
-      <label>Rarity
-        <select id="purchaseRarity" onchange="updatePurchaseRarity()">
-            <option value="">Select Rarity</option>
-        </select>
-      </label>
+      <div id="purchaseStoreListings" class="purchase-store-listings" role="group" aria-label="Store listings">
+        <div class="purchase-store-listings-empty">Select a card to compare store listings.</div>
+      </div>
+      <input id="purchaseListingCardId" type="hidden">
       <label>Put in
         <select id="purchaseDestination">
           <option>Binder Collection</option>
@@ -587,7 +586,7 @@
       </label>
       <label>Price per card
         <input id="purchasePrice" type="number" min="0" step="0.01" value="0">
-        <small id="purchasePriceSource" class="purchase-price-source">Price source: —</small>
+        <small id="purchasePriceSource" class="purchase-price-source">Selected listing: —</small>
       </label>
       <label>Purchase date
         <input id="purchaseDate" type="date">

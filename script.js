@@ -3422,12 +3422,11 @@ function openPurchase() {
   }
   populatePurchaseDestinations();
   document.getElementById("purchaseDestination").value = `binder:${activeBinderId}`;
-  const groups = new Map();
-  cards.forEach(card => {
-    const key = `${card.sourceName || "TCG Corner"}|${card.sourceLanguage}|${card.cardCode || card.productId}`;
-    if (!groups.has(key)) groups.set(key, card);
-  });
-  select.innerHTML = [...groups.values()].map(card => `<option value="${escapeHtml(card.id)}">${escapeHtml(card.name)} · ${escapeHtml(card.cardCode)}</option>`).join("");
+  select.innerHTML = `<option value="">Select a card</option>` +
+    groupPurchaseCards(cards).map(card =>
+      `<option value="${escapeHtml(card.id)}">${escapeHtml(card.name)} · ${escapeHtml(card.cardCode || "Card code unavailable")}</option>`
+    ).join("");
+  select.value = "";
   const search = document.getElementById("purchaseCardName");
   search.value = "";
   updatePurchaseCardSuggestions([]);
@@ -3445,6 +3444,199 @@ function normalizePurchaseSearchValue(value) {
     .replace(/[^a-z0-9]/g, "");
 }
 
+const PURCHASE_PRICE_SOURCES = ["Players Club", "TCG Corner"];
+
+function purchaseCardIdentityKey(card) {
+  const language = String(card?.sourceLanguage || "").trim().toLowerCase();
+  const code = String(card?.cardCode || "").trim().toUpperCase();
+  const name = normalizePurchaseSearchValue(card?.name);
+  const identity = code
+    ? `code:${code}`
+    : name
+      ? `name:${name}`
+      : `product:${card?.productId || card?.id || ""}`;
+  return `${language}|${identity}`;
+}
+
+function groupPurchaseCards(sourceCards) {
+  const groups = new Map();
+  sourceCards.forEach(card => {
+    const key = purchaseCardIdentityKey(card);
+    const sourceName = card.sourceName || "TCG Corner";
+    const group = groups.get(key);
+    if (group) {
+      group.sources.add(sourceName);
+    } else {
+      groups.set(key, { card, sources: new Set([sourceName]) });
+    }
+  });
+  return [...groups.values()].map(({ card, sources }) => ({
+    ...card,
+    purchaseSources: [...sources]
+  }));
+}
+
+function getPurchaseStoreVariants(card, source) {
+  const identity = purchaseCardIdentityKey(card);
+  const variants = cards.filter(item =>
+    (item.sourceName || "TCG Corner") === source &&
+    purchaseCardIdentityKey(item) === identity
+  );
+  return [...new Map(variants.map(item => [
+    String(item.rarity || item.variantTitle || "").trim().toLowerCase(),
+    item
+  ])).values()];
+}
+
+function getPurchaseStoreKey(source) {
+  return source === "Players Club" ? "playersClub" : "tcgCorner";
+}
+
+function getPurchaseStoreRaritySelectId(source) {
+  return source === "Players Club"
+    ? "purchasePlayersClubRarity"
+    : "purchaseTcgCornerRarity";
+}
+
+function getPurchaseStoreListing(card, source) {
+  const isPlayersClub = source === "Players Club";
+  const origin = isPlayersClub
+    ? "https://playersclubhk.com"
+    : "https://tcg-corner.com";
+  const directUrl = String(card?.url || "");
+  const isProductUrl = isPlayersClub
+    ? directUrl.startsWith(`${origin}/en/products/`) ||
+      directUrl.startsWith(`${origin}/products/`)
+    : directUrl.startsWith(`${origin}/products/`);
+  if (isProductUrl) return { url: directUrl, label: "View listing" };
+
+  const searchPath = isPlayersClub ? "/en/search" : "/search";
+  const query = String(card?.cardCode || card?.name || "").trim();
+  return {
+    url: `${origin}${searchPath}?q=${encodeURIComponent(query)}`,
+    label: "Search store"
+  };
+}
+
+function purchaseStorePriceMarkup(card, source) {
+  if (!card) return "—";
+  const sourcePrice = card.storePrice ?? card.price;
+  const sourceCurrency = card.storeCurrency || userCurrency;
+  const listing = getPurchaseStoreListing(card, source);
+  return `<strong>${escapeHtml(formatStorePrice(sourcePrice, sourceCurrency))}</strong>
+    <small>≈ ${escapeHtml(money(card.price))} in ${escapeHtml(userCurrency)}</small>
+    <a class="purchase-store-link" href="${escapeHtml(listing.url)}" target="_blank" rel="noopener noreferrer">${listing.label}</a>`;
+}
+
+function clearPurchaseStoreListings(message = "Select a card to compare store listings.") {
+  document.getElementById("purchaseStoreListings").innerHTML =
+    `<div class="purchase-store-listings-empty">${escapeHtml(message)}</div>`;
+  document.getElementById("purchaseListingCardId").value = "";
+  document.getElementById("purchasePrice").value = "";
+  document.getElementById("purchasePriceSource").textContent = "Selected listing: —";
+  document.getElementById("purchaseCardPreview").innerHTML =
+    `<div class="card-image">No image</div>`;
+}
+
+function updatePurchaseStorePrice(source, listingId) {
+  const card = cards.find(item => String(item.id) === String(listingId));
+  const price = document.getElementById(
+    `purchase-store-price-${getPurchaseStoreKey(source)}`
+  );
+  if (price) price.innerHTML = purchaseStorePriceMarkup(card, source);
+}
+
+function selectPurchaseStoreListing(source, listingId) {
+  const card = cards.find(item => String(item.id) === String(listingId));
+  const baseCard = cards.find(
+    item => String(item.id) === String(document.getElementById("purchaseCard").value)
+  );
+  if (
+    !card ||
+    (card.sourceName || "TCG Corner") !== source ||
+    (baseCard && purchaseCardIdentityKey(card) !== purchaseCardIdentityKey(baseCard))
+  ) {
+    return;
+  }
+
+  const radio = [...document.querySelectorAll('input[name="purchaseListingSource"]')]
+    .find(input => input.value === source);
+  if (radio) radio.checked = true;
+
+  const raritySelect = document.getElementById(getPurchaseStoreRaritySelectId(source));
+  if (raritySelect) raritySelect.value = String(card.id);
+
+  document.getElementById("purchaseListingCardId").value = String(card.id);
+  document.getElementById("purchasePrice").value = Number(card.price || 0);
+  document.getElementById("purchasePriceSource").textContent =
+    `Selected listing: ${source} · ${card.rarity || "Unspecified rarity"}`;
+  updatePurchaseStorePrice(source, card.id);
+  renderPurchaseCardPreview(card);
+}
+
+function renderPurchaseStoreListings(card, preferredListingId = card.id) {
+  const listings = PURCHASE_PRICE_SOURCES.map(source => ({
+    source,
+    variants: getPurchaseStoreVariants(card, source)
+  }));
+  const preferred = listings
+    .map(listing => ({
+      source: listing.source,
+      card: listing.variants.find(item =>
+        String(item.id) === String(preferredListingId)
+      )
+    }))
+    .find(listing => listing.card);
+  const baseSource = card.sourceName || "TCG Corner";
+  const selectedSource = preferred?.source ||
+    listings.find(listing =>
+      listing.source === baseSource && listing.variants.length
+    )?.source ||
+    listings.find(listing => listing.variants.length)?.source;
+
+  if (!selectedSource) {
+    clearPurchaseStoreListings("No Players Club or TCG Corner listing was found for this card.");
+    return;
+  }
+
+  document.getElementById("purchaseStoreListings").innerHTML = listings.map(listing => {
+    const sourceKey = getPurchaseStoreKey(listing.source);
+    const selected = listing.variants.find(item =>
+      String(item.id) === String(preferredListingId)
+    ) || listing.variants[0];
+    const disabled = listing.variants.length ? "" : "disabled";
+    const options = listing.variants.map(item =>
+      `<option value="${escapeHtml(item.id)}">${escapeHtml(item.rarity || item.variantTitle || "Unspecified rarity")}</option>`
+    ).join("");
+    const contents = listing.variants.length
+      ? `<label>Rarity
+          <select id="${getPurchaseStoreRaritySelectId(listing.source)}" data-purchase-source="${escapeHtml(listing.source)}">
+            ${options}
+          </select>
+        </label>
+        <div class="purchase-store-price">
+          <span>Listed price</span>
+          <div id="purchase-store-price-${sourceKey}">${purchaseStorePriceMarkup(selected, listing.source)}</div>
+        </div>`
+      : `<div class="purchase-store-listings-empty">No listing available.</div>`;
+
+    return `<fieldset class="purchase-store-listing">
+      <legend>${escapeHtml(listing.source)}</legend>
+      <label class="purchase-store-choice">
+        <input type="radio" name="purchaseListingSource" value="${escapeHtml(listing.source)}" data-purchase-source="${escapeHtml(listing.source)}" ${selectedSource === listing.source ? "checked" : ""} ${disabled}>
+        <span>Use this store listing</span>
+      </label>
+      ${contents}
+    </fieldset>`;
+  }).join("");
+
+  const selectedListing = preferred?.card ||
+    listings.find(listing => listing.source === selectedSource)?.variants[0];
+  if (selectedListing) {
+    selectPurchaseStoreListing(selectedSource, selectedListing.id);
+  }
+}
+
 function updatePurchaseCardSuggestions(matches, showNoResults = false) {
   const input = document.getElementById("purchaseCardName");
   const container = document.getElementById("purchaseCardSuggestions");
@@ -3453,7 +3645,7 @@ function updatePurchaseCardSuggestions(matches, showNoResults = false) {
   container.innerHTML = matches.map(card => `
     <button type="button" class="purchase-card-suggestion" role="option" aria-selected="false" data-card-id="${escapeHtml(card.id)}">
       <strong>${escapeHtml(card.name)}</strong>
-      <small>${escapeHtml(card.cardCode || "Card code unavailable")} · ${escapeHtml(card.sourceName || "TCG Corner")}${card.sourceLanguage ? ` · ${escapeHtml(card.sourceLanguage)}` : ""}</small>
+      <small>${escapeHtml(card.cardCode || "Card code unavailable")} · ${escapeHtml((card.purchaseSources || [card.sourceName || "TCG Corner"]).join(" · "))}${card.sourceLanguage ? ` · ${escapeHtml(card.sourceLanguage)}` : ""}</small>
     </button>
   `).join("") || (showNoResults ? `<div class="purchase-card-no-results">No cards match this name or card code.</div>` : "");
   const isVisible = matches.length > 0 || showNoResults;
@@ -3465,9 +3657,7 @@ function selectPurchaseCard(card) {
   const option = [...document.getElementById("purchaseCard").options].find(item => {
     const optionCard = cards.find(cardItem => String(cardItem.id) === String(item.value));
     return optionCard &&
-      (optionCard.sourceName || "TCG Corner") === (card.sourceName || "TCG Corner") &&
-      optionCard.sourceLanguage === card.sourceLanguage &&
-      (optionCard.cardCode ? optionCard.cardCode === card.cardCode : optionCard.productId === card.productId);
+      purchaseCardIdentityKey(optionCard) === purchaseCardIdentityKey(card);
   });
   if (!option) return;
 
@@ -3479,25 +3669,19 @@ function selectPurchaseCard(card) {
 
 function findPurchaseCard() {
   const query = normalizePurchaseSearchValue(document.getElementById("purchaseCardName").value);
-  const raritySelect = document.getElementById("purchaseRarity");
   document.getElementById("purchaseCard").value = "";
-  raritySelect.innerHTML = `<option value="">Select Rarity</option>`;
-  document.getElementById("purchaseCardPreview").innerHTML = `<div class="card-image">No image</div>`;
-  document.getElementById("purchasePriceSource").textContent = "Price source: —";
+  clearPurchaseStoreListings();
   if (!query) {
     updatePurchaseCardSuggestions([]);
     return;
   }
 
-  const groups = new Map();
-  cards.forEach(card => {
+  const matchingCards = cards.filter(card => {
     const name = normalizePurchaseSearchValue(card.name);
     const code = normalizePurchaseSearchValue(card.cardCode);
-    if (!name.includes(query) && !code.includes(query)) return;
-    const key = `${card.sourceName || "TCG Corner"}|${card.sourceLanguage}|${card.cardCode || card.productId}`;
-    if (!groups.has(key)) groups.set(key, card);
+    return name.includes(query) || code.includes(query);
   });
-  const matches = [...groups.values()];
+  const matches = groupPurchaseCards(matchingCards);
   const exactMatch = matches.find(card =>
     normalizePurchaseSearchValue(card.name) === query ||
     normalizePurchaseSearchValue(card.cardCode) === query
@@ -3515,28 +3699,13 @@ document.getElementById("purchaseCardSuggestions").addEventListener("click", eve
   const card = cards.find(item => String(item.id) === String(button.dataset.cardId));
   if (card) selectPurchaseCard(card);
 });
-function getRarityVariants(card) {
-  return cards.filter(item =>
-    (item.sourceName || "TCG Corner") === (card.sourceName || "TCG Corner") &&
-    item.sourceLanguage === card.sourceLanguage &&
-    (item.cardCode ? item.cardCode === card.cardCode : item.productId === card.productId)
-  );
-}
 function updatePurchaseFields() {
   const card = cards.find(c => c.id == document.getElementById("purchaseCard").value);
-  if (!card) return;
-  const raritySelect = document.getElementById("purchaseRarity");
-  const variants = [...new Map(getRarityVariants(card).map(item => [item.rarity, item])).values()];
-  raritySelect.innerHTML = variants.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.rarity)} · ${money(item.price)}</option>`).join("");
-  updatePurchaseRarity();
-}
-function updatePurchaseRarity() {
-  const card = cards.find(c => c.id == document.getElementById("purchaseRarity").value);
-  if (!card) return;
-  document.getElementById("purchasePrice").value = card.price || 0;
-  document.getElementById("purchasePriceSource").textContent =
-    `Price source: ${card.sourceName || "TCG Corner"}`;
-  renderPurchaseCardPreview(card);
+  if (!card) {
+    clearPurchaseStoreListings();
+    return;
+  }
+  renderPurchaseStoreListings(card);
 }
 function renderPurchaseCardPreview(card) {
   const preview = document.getElementById("purchaseCardPreview");
@@ -3545,7 +3714,17 @@ function renderPurchaseCardPreview(card) {
   bindCardImageFallbacks(preview);
 }
 document.getElementById("purchaseCard").addEventListener("change", updatePurchaseFields);
-document.getElementById("purchaseRarity").addEventListener("change", updatePurchaseRarity);
+document.getElementById("purchaseStoreListings").addEventListener("change", event => {
+  const source = event.target.dataset.purchaseSource;
+  if (!source) return;
+  if (event.target.matches('input[name="purchaseListingSource"]')) {
+    const raritySelect = document.getElementById(getPurchaseStoreRaritySelectId(source));
+    if (raritySelect?.value) selectPurchaseStoreListing(source, raritySelect.value);
+  } else if (event.target.matches("select[data-purchase-source]")) {
+    updatePurchaseStorePrice(source, event.target.value);
+    selectPurchaseStoreListing(source, event.target.value);
+  }
+});
 function closePurchase() {
   document.getElementById("purchaseModal").classList.remove("open");
   document.body.classList.remove("purchase-from-card-details");
@@ -3924,7 +4103,9 @@ document.getElementById("cardDetailsCopies")
   });
 
 function savePurchase() {
-  const card = cards.find(c => c.id == document.getElementById("purchaseRarity").value);
+  const card = cards.find(c =>
+    String(c.id) === String(document.getElementById("purchaseListingCardId").value)
+  );
   const qty = Number(document.getElementById("purchaseQty").value);
   const price = Number(document.getElementById("purchasePrice").value);
   const destinationChoice = document.getElementById("purchaseDestination").value;
@@ -4987,15 +5168,12 @@ function openPurchaseFor(id) {
   const cardOption = [...document.getElementById("purchaseCard").options].find(option => {
     const optionCard = cards.find(card => String(card.id) === String(option.value));
     return optionCard &&
-      (optionCard.sourceName || "TCG Corner") === (selectedCard.sourceName || "TCG Corner") &&
-      optionCard.sourceLanguage === selectedCard.sourceLanguage &&
-      (optionCard.cardCode ? optionCard.cardCode === selectedCard.cardCode : optionCard.productId === selectedCard.productId);
+      purchaseCardIdentityKey(optionCard) === purchaseCardIdentityKey(selectedCard);
   });
   if (cardOption) document.getElementById("purchaseCard").value = cardOption.value;
   document.getElementById("purchaseCardName").value = selectedCard.name;
   updatePurchaseFields();
-  document.getElementById("purchaseRarity").value = selectedCard.id;
-  updatePurchaseRarity();
+  selectPurchaseStoreListing(selectedCard.sourceName || "TCG Corner", selectedCard.id);
 }
 
 async function loadCollectionProducts(feed) {
