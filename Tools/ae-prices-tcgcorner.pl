@@ -3,6 +3,9 @@ use warnings;
 use JSON::PP qw(decode_json encode_json);
 use File::Basename qw(dirname);
 use File::Path qw(make_path);
+use FindBin;
+use lib $FindBin::Bin;
+use PriceUpdater qw(parse_price_title);
 
 binmode(STDOUT, ':encoding(UTF-8)');
 
@@ -27,40 +30,6 @@ sub json_from {
   return $json;
 }
 
-sub parse_title {
-  my ($raw) = @_;
-  return unless defined $raw;
-
-  # Examples: CR12-AE097 Card Name (UL) and CR12-AE097 Card Name (UL) (Status B)
-  return unless $raw =~ /^\s*([A-Z0-9]{2,8}-AE[SC]?[0-9]{2,4})\s+(.*)$/i;
-  my ($code, $rest) = (uc($1), $2);
-
-  my $condition = '';
-  $condition = uc($1) if $raw =~ /\(\s*Status\s*([A-Za-z])\s*\)/i;
-  $condition = 'D' if !$condition && $raw =~ /damaged|\bDMG\b|played/i;
-
-  my $without_status = $rest;
-  $without_status =~ s/\(\s*Status[^)]*\)\s*//gi;
-  $without_status =~ s/\s+$//;
-
-  my $rarity = '';
-  $rarity = $1 if $without_status =~ /\(\s*([A-Za-z][A-Za-z'’._\/-]*(?:\s+[A-Za-z][A-Za-z'’._\/-]*)*)\s*\)\s*$/;
-  $rarity =~ s/^\s+|\s+$//g if $rarity;
-  $rarity = uc($rarity) if $rarity;
-
-  $rest =~ s/\(\s*Status[^)]*\)//gi;
-  $rest =~ s/\(\s*[A-Za-z][A-Za-z'’._\/-]*(?:\s+[A-Za-z][A-Za-z'’._\/-]*)*\s*\)\s*$//;
-  $rest =~ s/\s+/ /g;
-  $rest =~ s/^\s+|\s+$//g;
-
-  return {
-    code => $code,
-    name => $rest,
-    rarity => $rarity,
-    condition => $condition
-  };
-}
-
 sub run_curl {
   my ($url) = @_;
   my $command = sprintf(
@@ -75,6 +44,7 @@ sub run_curl {
 
 my @rows;
 my $skipped = 0;
+my @unparsed_titles;
 my %seen;
 
 for my $page (1 .. $MAX_PAGES) {
@@ -92,9 +62,10 @@ for my $page (1 .. $MAX_PAGES) {
   for my $product (@$products) {
     next unless ref($product) eq 'HASH';
 
-    my $parsed = parse_title($product->{title});
+    my $parsed = parse_price_title('TCG_CORNER', $product->{title});
     unless ($parsed) {
       $skipped++;
+      push @unparsed_titles, $product->{title} if defined $product->{title};
       next;
     }
 
@@ -170,3 +141,8 @@ if (@played) {
 
 printf "\n%d price rows -> %s (currency %s, median %.2f)\n", scalar(@rows), $OUT, $currency, $median;
 printf "%d listings skipped\n", $skipped if $skipped;
+if (@unparsed_titles) {
+  printf "%d product titles did not match a supported printing-code format; examples:\n",
+    scalar(@unparsed_titles);
+  print "  $_\n" for @unparsed_titles[0 .. ($#unparsed_titles < 19 ? $#unparsed_titles : 19)];
+}
