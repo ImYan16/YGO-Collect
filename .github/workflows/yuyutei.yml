@@ -8,22 +8,22 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: yuyutei-data-update
+  cancel-in-progress: false
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Perl
-        uses: shogo82148/actions-setup-perl@v1
-        with:
-          perl-version: "5.40"
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Install dependencies
         run: |
-          cpanm --notest LWP::UserAgent LWP::Protocol::https URI
+          sudo apt-get update
+          sudo apt-get install --yes perl libwww-perl liblwp-protocol-https-perl liburi-perl
 
       - name: Check Perl syntax
         run: |
