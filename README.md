@@ -80,6 +80,8 @@ The project separates card catalog information from pricing information so price
 Supported or integrated sources include TCG Corner and Players Club data.
 Deck prices match the full printing code, region, and rarity. Snapshot data is read from `tcgc-prices.json`, `playersclub-prices.json` (Asian English), and `playersclub-prices-ocg.json` (OCG); rows without a usable rarity are only used as exact-code fallbacks.
 
+The scheduled price updater reads every page exposed by the vendor collections and parses printing codes from product titles, including slash-separated codes, alphanumeric Asian-English suffixes, and titles where rarity text is adjacent to the code. Listings without a supported card code or a positive price are excluded; the workflow logs examples of titles it cannot parse. The OCG snapshot can only include products the Players Club OCG collection currently publishes.
+
 ### TCG and Asian-English Support
 
 The project is designed around multiple Yu-Gi-Oh! regions and card markets.
