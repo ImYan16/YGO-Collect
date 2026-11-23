@@ -210,6 +210,8 @@ Your collection and deck information are stored by the application in the browse
 
 No user account is required for the basic application.
 
+The application does not automatically request IP-based geolocation. It may contact `open.er-api.com` to refresh currency conversion rates; that provider receives the browser request metadata associated with the exchange-rate request.
+
 ## Technology
 
 YGO-Collect currently uses:

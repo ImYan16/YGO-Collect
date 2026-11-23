@@ -345,62 +345,17 @@ function getSetRarities(card, setCode) {
 
 
 async function detectUserCurrency() {
-    const currencyMap = {
-        PH: "PHP",
-        US: "USD",
-        CA: "CAD",
-        GB: "GBP",
-        SG: "SGD",
-        AU: "AUD",
-        JP: "JPY",
-        KR: "KRW",
-        CN: "CNY",
-        HK: "HKD",
-        TW: "TWD",
-        MY: "MYR",
-        ID: "IDR",
-        TH: "THB",
-        VN: "VND",
-        IN: "INR",
-        NZ: "NZD",
-        DE: "EUR",
-        FR: "EUR",
-        IT: "EUR",
-        ES: "EUR",
-        NL: "EUR"
-    };
-
-    try {
-        const response = await fetch("https://ipwho.is/");
-
-        if (!response.ok) {
-            throw new Error(`Location service returned HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        if (!data.success) {
-            throw new Error(data.message || "Unable to detect location");
-        }
-
-        userCurrency = currencyMap[data.country_code] || "PHP";
-
-    } catch (error) {
-        console.error("Unable to detect country:", error);
-
-        // Philippines is the fallback
-        userCurrency = "PHP";
-    }
-
+    userCurrency = "PHP";
     await loadExchangeRates();
     updateCurrencyDisplay();
 }
 
 async function loadExchangeRates() {
   try {
-    const cached = JSON.parse(localStorage.getItem(EXCHANGE_RATE_CACHE_KEY) || "null");
+    const cached = readJsonStorage(EXCHANGE_RATE_CACHE_KEY, null);
     const age = cached?.savedAt ? Date.now() - new Date(cached.savedAt).getTime() : Infinity;
-    if (cached?.rates && age < 12 * 60 * 60 * 1000) {
+    if (cached?.rates && typeof cached.rates === "object" &&
+        !Array.isArray(cached.rates) && age < 12 * 60 * 60 * 1000) {
       exchangeRates = { ...exchangeRates, ...cached.rates };
       return;
     }
@@ -599,24 +554,78 @@ let rulingNextQaIndex = 0;
 let rulingFailedQaIds = [];
 let rulingIsLoading = false;
 
-let purchases = JSON.parse(localStorage.getItem("ygoPurchases") || "[]");
-let cardWishlist = JSON.parse(localStorage.getItem("ygoCardWishlist") || "[]");
-let marketplaceListings = JSON.parse(
-  localStorage.getItem("ygoMarketplaceListings") || "[]"
-);
+function readJsonStorage(key, fallback) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || "null");
+    return value === null ? fallback : value;
+  } catch (error) {
+    console.warn(`Ignoring invalid browser data for ${key}:`, error);
+    return fallback;
+  }
+}
+
+function sanitizeText(value, maxLength) {
+  const text = String(value ?? "").trim();
+  return text.slice(0, maxLength);
+}
+
+function normalizePurchaseRecords(records) {
+  if (!Array.isArray(records)) return [];
+  return records.filter(record => record && typeof record === "object").map(record => ({
+    ...record,
+    card: sanitizeText(record.card, 200),
+    date: sanitizeText(record.date, 40),
+    qty: Number.isFinite(Number(record.qty)) ? Math.max(0, Number(record.qty)) : 0,
+    price: Number.isFinite(Number(record.price)) ? Math.max(0, Number(record.price)) : 0,
+    total: Number.isFinite(Number(record.total)) ? Math.max(0, Number(record.total)) : 0,
+    destination: sanitizeText(record.destination, 200),
+    printing: sanitizeText(record.printing, 200),
+    set: sanitizeText(record.set, 100),
+    rarity: sanitizeText(record.rarity, 100)
+  }));
+}
+
+function normalizeNamedRecords(records) {
+  if (!Array.isArray(records)) return [];
+  return records.filter(record => record && typeof record === "object").map(record => ({
+    ...record,
+    name: sanitizeText(record.name, 200),
+    card: sanitizeText(record.card, 200),
+    set: sanitizeText(record.set, 100),
+    rarity: sanitizeText(record.rarity, 100)
+  }));
+}
+
+let purchases = readJsonStorage("ygoPurchases", []);
+purchases = normalizePurchaseRecords(purchases);
+let cardWishlist = normalizeNamedRecords(readJsonStorage("ygoCardWishlist", []));
+let marketplaceListings = normalizeNamedRecords(readJsonStorage("ygoMarketplaceListings", []));
 let cardDatabase = [];
-let decks = JSON.parse(localStorage.getItem("ygoDecks") || "[]");
-let deckCards = JSON.parse(localStorage.getItem("ygoDeckCards") || "{}");
-let deckCardOrder = JSON.parse(localStorage.getItem("ygoDeckCardOrder") || "{}");
+let decks = readJsonStorage("ygoDecks", []);
+decks = Array.isArray(decks)
+  ? decks.filter(deck => typeof deck === "string").map(deck => sanitizeText(deck, 100))
+  : [];
+let deckCards = readJsonStorage("ygoDeckCards", {});
+if (!deckCards || typeof deckCards !== "object" || Array.isArray(deckCards)) deckCards = {};
+let deckCardOrder = readJsonStorage("ygoDeckCardOrder", {});
+if (!deckCardOrder || typeof deckCardOrder !== "object" || Array.isArray(deckCardOrder)) deckCardOrder = {};
 const DEFAULT_BINDER_ID = "default";
 const DEFAULT_BINDER = {
   id: DEFAULT_BINDER_ID,
   name: "Binder Collection",
   description: "Your Yu-Gi-Oh! collection."
 };
-const savedBinderState = JSON.parse(localStorage.getItem("ygoBinders") || "null");
+const savedBinderState = readJsonStorage("ygoBinders", null);
 let binders = Array.isArray(savedBinderState?.binders)
   ? savedBinderState.binders
+      .filter(binder => binder && typeof binder === "object")
+      .map(binder => ({
+        ...binder,
+        id: sanitizeText(binder.id, 100),
+        name: sanitizeText(binder.name, 80),
+        description: sanitizeText(binder.description, 240)
+      }))
+      .filter(binder => binder.id)
   : [];
 if (!binders.some(binder => binder.id === DEFAULT_BINDER_ID)) {
   binders.unshift({ ...DEFAULT_BINDER });
@@ -4281,7 +4290,7 @@ function renderDashboard() {
     (() => {
       const marketPrice = cards.find(card => String(card.id) === String(p.cardId))?.price || 0;
       const gain = marketPrice * Number(p.qty || 0) - p.total;
-      return `<tr><td>${p.date}</td><td>${p.card}</td><td>${p.qty}</td><td>${money(p.price)}</td><td>${money(marketPrice)}</td><td>${money(p.total)}</td><td class="${gain >= 0 ? "green" : "red"}">${gain >= 0 ? "+" : ""}${money(gain)}</td></tr>`;
+      return `<tr><td>${escapeHtml(p.date)}</td><td>${escapeHtml(p.card)}</td><td>${escapeHtml(p.qty)}</td><td>${money(p.price)}</td><td>${money(marketPrice)}</td><td>${money(p.total)}</td><td class="${gain >= 0 ? "green" : "red"}">${gain >= 0 ? "+" : ""}${money(gain)}</td></tr>`;
     })()
   ).join("") || `<tr><td colspan="7" class="empty">No purchases yet.</td></tr>`;
 }
@@ -4777,7 +4786,7 @@ function queueCardRender() {
 
 function getCardSearchHistory() {
   try {
-    const history = JSON.parse(localStorage.getItem(CARD_SEARCH_HISTORY_KEY) || "[]");
+    const history = readJsonStorage(CARD_SEARCH_HISTORY_KEY, []);
     return Array.isArray(history)
       ? history.filter(term => typeof term === "string" && term.trim())
       : [];
@@ -5463,7 +5472,7 @@ async function loadLivePlayersClubProducts(feed) {
 
 function getCachedPlayersClubProducts() {
   try {
-    const cached = JSON.parse(localStorage.getItem(PLAYERS_CLUB_CACHE_KEY) || "null");
+    const cached = readJsonStorage(PLAYERS_CLUB_CACHE_KEY, null);
     return Array.isArray(cached?.cards) && cached.cards.length ? cached.cards : null;
   } catch (error) {
     console.warn("Unable to read Players Club cache:", error);
@@ -5473,7 +5482,7 @@ function getCachedPlayersClubProducts() {
 
 function isPlayersClubCacheStale() {
   try {
-    const cached = JSON.parse(localStorage.getItem(PLAYERS_CLUB_CACHE_KEY) || "null");
+    const cached = readJsonStorage(PLAYERS_CLUB_CACHE_KEY, null);
     if (!Array.isArray(cached?.cards) || !cached.cards.some(card => card.sourceLanguage === "Japanese")) {
       return true;
     }
@@ -5701,7 +5710,7 @@ async function getTCGCornerCacheData() {
 
   let legacyCache = null;
   try {
-    legacyCache = JSON.parse(localStorage.getItem(TCG_CORNER_CACHE_KEY) || "null");
+    legacyCache = readJsonStorage(TCG_CORNER_CACHE_KEY, null);
   } catch (error) {
     console.warn("Unable to read the legacy TCG Corner cache:", error);
   }
