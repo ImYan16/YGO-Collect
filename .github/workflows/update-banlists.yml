@@ -34,5 +34,21 @@ jobs:
             echo "No banlist changes to commit"
           else
             git commit -m "Update official banlists"
-            git push
+            branch="$GITHUB_REF_NAME"
+            for attempt in 1 2 3 4 5; do
+              if ! git fetch origin "$branch"; then
+                echo "Fetch failed on push attempt $attempt."
+              elif ! git rebase "origin/$branch"; then
+                git rebase --abort || true
+                echo "Unable to rebase generated banlist data; resolve the conflict before retrying."
+                exit 1
+              elif git push origin "HEAD:$branch"; then
+                exit 0
+              else
+                echo "Push rejected on attempt $attempt; retrying with the latest branch."
+              fi
+              if [ "$attempt" -lt 5 ]; then sleep "$((attempt * 2))"; fi
+            done
+            echo "Unable to push generated banlist data after 5 attempts."
+            exit 1
           fi

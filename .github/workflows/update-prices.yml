@@ -22,6 +22,9 @@ jobs:
       - name: Install Perl dependencies
         run: sudo apt-get update && sudo apt-get install --yes perl curl
 
+      - name: Test price title parsing
+        run: perl Tools/test_price_updater.pl
+
       - name: Harvest TCG Corner prices
         run: perl Tools/ae-prices-tcgcorner.pl
 
@@ -41,5 +44,21 @@ jobs:
             echo "No price changes to commit"
           else
             git commit -m "Update TCG Corner prices"
-            git push
+            branch="$GITHUB_REF_NAME"
+            for attempt in 1 2 3 4 5; do
+              if ! git fetch origin "$branch"; then
+                echo "Fetch failed on push attempt $attempt."
+              elif ! git rebase "origin/$branch"; then
+                git rebase --abort || true
+                echo "Unable to rebase generated price data; resolve the conflict before retrying."
+                exit 1
+              elif git push origin "HEAD:$branch"; then
+                exit 0
+              else
+                echo "Push rejected on attempt $attempt; retrying with the latest branch."
+              fi
+              if [ "$attempt" -lt 5 ]; then sleep "$((attempt * 2))"; fi
+            done
+            echo "Unable to push generated price data after 5 attempts."
+            exit 1
           fi
